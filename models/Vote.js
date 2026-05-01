@@ -9,7 +9,8 @@ const VoteSchema = new mongoose.Schema({
   yesVotes: { type: Number, default: 0 },
   noVotes: { type: Number, default: 0 },
   votedMembers: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
-  createdAt: { type: Date, default: Date.now }
+  createdAt: { type: Date, default: Date.now },
+  expiresAt: { type: Date }
 });
 
 module.exports = mongoose.model('Vote', VoteSchema);
