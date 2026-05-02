@@ -1639,5 +1639,93 @@ router.post('/blockchain/vote/:propositionId/voter', requireAuth, async (req, re
   }
 });
 
+// --- BLOCKCHAIN INTEGRITY & AUDIT ROUTES ---
+router.get('/cooperatives/:id/blockchain/verify', loadCoop, async (req, res) => {
+  try {
+    const transactions = await Transaction.find({ cooperativeId: req.params.id }).sort({ date: 1 });
+    if (transactions.length === 0) {
+      return res.json({ isValid: true, message: "Registre vide (Chaîne intègre)" });
+    }
+
+    let previousHash = '0';
+    for (let tx of transactions) {
+      // Pour les anciennes transactions sans hash, on simule l'intégrité si non synchronisé
+      if (!tx.txHash) {
+        previousHash = '0';
+        continue;
+      }
+
+      // Vérification du chaînage
+      if (tx.previousHash !== previousHash) {
+        return res.json({ 
+          isValid: false, 
+          message: `Rupture de chaîne détectée sur le bloc ${tx._id.toString().substring(0,6)}`,
+          corruptedId: tx._id 
+        });
+      }
+
+      // Vérification de l'empreinte (Re-calcul du hash)
+      const calculated = tx.calculateHash ? tx.calculateHash() : null;
+      if (calculated && tx.txHash !== calculated) {
+        return res.json({ 
+          isValid: false, 
+          message: `Altération de données détectée sur le bloc ${tx.title}`,
+          corruptedId: tx._id 
+        });
+      }
+      previousHash = tx.txHash;
+    }
+
+    res.json({ 
+      isValid: true, 
+      message: "Registre audité : Chaîne de confiance intacte",
+      blockCount: transactions.length 
+    });
+  } catch (err) {
+    res.status(500).json({ error: "Échec de l'audit : " + err.message });
+  }
+});
+
+// Route de synchronisation pour sceller les anciennes transactions (Admin)
+router.post('/cooperatives/:id/blockchain/sync', loadCoop, requirePresidentOrAdmin, async (req, res) => {
+  try {
+    const transactions = await Transaction.find({ cooperativeId: req.params.id }).sort({ date: 1 });
+    let lastHash = '0';
+    let syncedCount = 0;
+
+    for (let tx of transactions) {
+      if (!tx.txHash) {
+        tx.previousHash = lastHash;
+        // Déclenche le pre-save hook pour générer le hash
+        await tx.save();
+        syncedCount++;
+      }
+      lastHash = tx.txHash;
+    }
+
+    res.json({ message: "Synchronisation terminée", syncedCount });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Route pour l'historique complet scellé
+router.get('/cooperatives/:id/blockchain/ledger', loadCoop, async (req, res) => {
+  try {
+    const transactions = await Transaction.find({ cooperativeId: req.params.id }).sort({ date: -1 });
+    const ledger = transactions.map(t => ({
+      id: t._id,
+      txHash: t.txHash || 'NON SCELÉ',
+      typeOp: t.type === 'in' ? 'ENTRÉE' : 'SORTIE',
+      description: t.title,
+      montant: t.amount,
+      timestamp: t.date
+    }));
+    res.json(ledger);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;
 
