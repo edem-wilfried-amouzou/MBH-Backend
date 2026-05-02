@@ -20,7 +20,7 @@ const DEFAULT_WEB_ORIGINS = [
   'https://agrilogix-ten.vercel.app',
   'https://agrixlogix.vercel.app', // Ajout du https
   'http://localhost:5173',
-  'http://localhost:5174',
+  'http://localhost:5176',
   'http://localhost:5175',
   'http://localhost:5177',
   'capacitor://localhost', // Pour les apps mobiles (Ionic/Capacitor)
