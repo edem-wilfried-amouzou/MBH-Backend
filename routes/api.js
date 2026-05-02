@@ -943,22 +943,26 @@ router.post('/cooperatives/:id/transactions', requireAuth, loadCoop, requireCoop
   try {
     const { title, amount, type, category } = req.body;
     const coopId = req.params.id;
-    // Validate amount
     if (!amount || Number(amount) <= 0) return res.status(400).json({ error: 'Montant invalide' });
     const numericAmount = Number(amount);
 
-    // Compute current confirmed balance (only completed transactions)
     const allTx = await Transaction.find({ cooperativeId: coopId });
     const confirmedIn = allTx.filter(t => t.type === 'in' && t.status === 'completed').reduce((s,t)=>s+t.amount,0);
     const confirmedOut = allTx.filter(t => t.type === 'out' && t.status === 'completed').reduce((s,t)=>s+t.amount,0);
     const currentBalance = confirmedIn - confirmedOut;
 
-    // If withdrawal and insufficient funds -> reject immediately
     if (type === 'out' && numericAmount > currentBalance) {
       return res.status(400).json({ error: 'Solde insuffisant pour cette opération' });
     }
 
+    const isPresOrAdmin = req.user?.role === 'Admin' || isPresident(req.user);
     const shouldCreateVote = (type === 'out') && (numericAmount >= 500000);
+    let initialStatus = 'pending';
+    
+    // Si c'est le président qui crée ET que ça ne dépasse pas 500k, c'est auto-validé
+    if (isPresOrAdmin && !shouldCreateVote) {
+      initialStatus = 'completed';
+    }
 
     const newTx = new Transaction({
       cooperativeId: coopId,
@@ -967,7 +971,7 @@ router.post('/cooperatives/:id/transactions', requireAuth, loadCoop, requireCoop
       type,
       category,
       submittedBy: req.user?.name || 'user',
-      status: shouldCreateVote ? 'pending' : 'completed',
+      status: initialStatus,
     });
     await newTx.save();
 
@@ -982,11 +986,14 @@ router.post('/cooperatives/:id/transactions', requireAuth, loadCoop, requireCoop
             montant: numericAmount,
             description: title,
           });
-        } catch (_) {
-          /* ignore */
-        }
+        } catch (_) { /* ignore */ }
       }
     }
+
+    // Emit real-time creation event so UI updates immediately
+    try {
+      req.io.to(`coop_${coopId}`).emit('stats_update', { newTransaction: newTx });
+    } catch (_) {}
 
     if (shouldCreateVote) {
       const expiresAt = new Date();
@@ -1058,6 +1065,56 @@ router.post('/cooperatives/:id/transactions', requireAuth, loadCoop, requireCoop
     }
 
     res.status(201).json(newTx);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+router.post('/cooperatives/:id/transactions/:txId/validate', requireAuth, loadCoop, requirePresidentOrAdmin, async (req, res) => {
+  try {
+    const tx = await Transaction.findById(req.params.txId);
+    if (!tx || String(tx.cooperativeId) !== req.params.id) return res.status(404).json({ error: 'Transaction introuvable' });
+    if (tx.status !== 'pending') return res.status(400).json({ error: 'Cette transaction n\'est pas en attente' });
+
+    // Validate balance if outgoing
+    if (tx.type === 'out') {
+      const allTx = await Transaction.find({ cooperativeId: req.params.id });
+      const confirmedIn = allTx.filter(t => t.type === 'in' && t.status === 'completed').reduce((s,t)=>s+t.amount,0);
+      const confirmedOut = allTx.filter(t => t.type === 'out' && t.status === 'completed').reduce((s,t)=>s+t.amount,0);
+      const currentBalance = confirmedIn - confirmedOut;
+      if (tx.amount > currentBalance) {
+        return res.status(400).json({ error: 'Solde insuffisant pour valider cette opération' });
+      }
+    }
+
+    tx.status = 'completed';
+    await tx.save();
+
+    // Ancrer sur la blockchain
+    const chainHash = await anchorCompletedTransaction(tx);
+    if (chainHash) {
+      tx.txHash = chainHash;
+      await tx.save();
+      try {
+        req.io.to(`coop_${req.params.id}`).emit('blockchain_transaction', {
+          txHash: chainHash, montant: tx.amount, description: tx.title,
+        });
+      } catch (_) {}
+    }
+
+    try { req.io.to(`coop_${req.params.id}`).emit('stats_update', { transactionValidated: tx }); } catch (_) {}
+    res.json({ message: 'Transaction validée', transaction: tx });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+router.post('/cooperatives/:id/transactions/:txId/reject', requireAuth, loadCoop, requirePresidentOrAdmin, async (req, res) => {
+  try {
+    const tx = await Transaction.findById(req.params.txId);
+    if (!tx || String(tx.cooperativeId) !== req.params.id) return res.status(404).json({ error: 'Transaction introuvable' });
+    if (tx.status !== 'pending') return res.status(400).json({ error: 'Cette transaction n\'est pas en attente' });
+
+    tx.status = 'rejected';
+    await tx.save();
+    try { req.io.to(`coop_${req.params.id}`).emit('stats_update', { transactionRejected: tx }); } catch (_) {}
+    res.json({ message: 'Transaction rejetée', transaction: tx });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 

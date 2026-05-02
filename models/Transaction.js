@@ -9,7 +9,7 @@ const TransactionSchema = new mongoose.Schema({
   category: String,
   submittedBy: String,
   status: { type: String, enum: ['completed', 'pending', 'rejected'], default: 'completed' },
-  txHash: { type: String, unique: true, sparse: true },
+  txHash: { type: String, sparse: true },
   previousHash: { type: String, default: '0' },
   nonce: { type: Number, default: 0 },
   date: { type: Date, default: Date.now }
@@ -21,16 +21,15 @@ TransactionSchema.methods.calculateHash = function() {
   return crypto.createHash('sha256').update(data).digest('hex');
 };
 
-// Avant chaque sauvegarde, on scelle la transaction
-TransactionSchema.pre('save', async function(next) {
-  if (this.isNew || this.isModified('amount') || this.isModified('title')) {
+// Avant chaque sauvegarde, on scelle la transaction si elle est complétée
+TransactionSchema.pre('save', async function() {
+  if (this.status === 'completed' && (!this.txHash || this.isModified('amount') || this.isModified('title') || this.isModified('status'))) {
     if (!this.previousHash || this.previousHash === '0') {
-      const lastTx = await this.constructor.findOne({ cooperativeId: this.cooperativeId }).sort({ date: -1 });
-      this.previousHash = lastTx ? lastTx.txHash : '0';
+      const lastTx = await this.constructor.findOne({ cooperativeId: this.cooperativeId, status: 'completed' }).sort({ date: -1 });
+      this.previousHash = lastTx && lastTx.txHash ? lastTx.txHash : '0';
     }
     this.txHash = this.calculateHash();
   }
-  next();
 });
 
 module.exports = mongoose.model('Transaction', TransactionSchema);
