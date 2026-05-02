@@ -1020,5 +1020,218 @@ router.put('/programmes/:id', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// ═══════════════════════════════════════════════════════════
+// ROUTES BLOCKCHAIN
+// ═══════════════════════════════════════════════════════════
+const { getContract, wallet } = require('../blockchain');
+
+// Enregistrer une transaction sur la blockchain
+router.post('/cooperatives/:id/blockchain/transaction', requireAuth, loadCoop, requireCoopMember, async (req, res) => {
+  try {
+    const { typeOp, montant, description } = req.body;
+    // typeOp: 0=COTISATION, 1=ACHAT, 2=PRIME, 3=REMBOURSEMENT
+    const contract = getContract('CoopLedger');
+    const tx = await contract.enregistrerTransaction(typeOp, montant, description);
+    await tx.wait();
+    
+    // Sauvegarder aussi dans MongoDB
+    const newTx = new Transaction({
+      cooperativeId: req.params.id,
+      title: description,
+      amount: montant,
+      type: typeOp === 0 || typeOp === 2 ? 'in' : 'out',
+      status: 'completed',
+      txHash: tx.hash,
+      submittedBy: req.user?.name || 'user'
+    });
+    await newTx.save();
+
+    // Notifier en temps réel
+    req.io.to(`coop_${req.params.id}`).emit('blockchain_transaction', {
+      txHash: tx.hash,
+      montant,
+      description
+    });
+
+    res.status(201).json({ 
+      message: 'Transaction enregistrée sur la blockchain',
+      txHash: tx.hash,
+      transaction: newTx
+    });
+  } catch (err) { 
+    res.status(500).json({ error: err.message }); 
+  }
+});
+
+// Consulter le solde sur la blockchain
+router.get('/cooperatives/:id/blockchain/solde', requireAuth, loadCoop, requireCoopMember, async (req, res) => {
+  try {
+    const contract = getContract('CoopLedger');
+    const solde = await contract.getSolde();
+    res.json({ solde: solde.toString() });
+  } catch (err) { 
+    res.status(500).json({ error: err.message }); 
+  }
+});
+
+// Récupérer l'historique des transactions blockchain
+router.get('/cooperatives/:id/blockchain/transactions', requireAuth, loadCoop, requireCoopMember, async (req, res) => {
+  try {
+    const contract = getContract('CoopLedger');
+    const nombre = await contract.getNombreTransactions();
+    const transactions = [];
+    for (let i = 0; i < nombre; i++) {
+      const tx = await contract.getTransaction(i);
+      transactions.push({
+        id: tx.id.toString(),
+        membre: tx.membre,
+        typeOp: ['COTISATION', 'ACHAT', 'PRIME', 'REMBOURSEMENT'][tx.typeOp],
+        montant: tx.montant.toString(),
+        description: tx.description,
+        timestamp: new Date(Number(tx.timestamp) * 1000).toISOString()
+      });
+    }
+    res.json(transactions);
+  } catch (err) { 
+    res.status(500).json({ error: err.message }); 
+  }
+});
+
+// Créer une coopérative sur la blockchain à l'inscription
+router.post('/cooperatives/:id/blockchain/creer', requireAuth, loadCoop, requirePresidentOrAdmin, async (req, res) => {
+  try {
+    const { nom } = req.body;
+    const contract = getContract('Cooperative');
+    const tx = await contract.creerCooperative(nom);
+    const receipt = await tx.wait();
+    res.json({ 
+      message: 'Coopérative créée sur la blockchain',
+      txHash: tx.hash,
+      walletAdresse: wallet.address
+    });
+  } catch (err) { 
+    res.status(500).json({ error: err.message }); 
+  }
+});
+
+// Simuler un paiement Mobile Money (Flooz ou T-Money)
+router.post('/cooperatives/:id/blockchain/mobilemoney', requireAuth, loadCoop, requireCoopMember, async (req, res) => {
+  try {
+    const { telephone, operateur, montant, walletDestination } = req.body;
+    // operateur: 0=FLOOZ, 1=TMONEY
+    const contract = getContract('MobileMoney');
+    
+    // Générer une référence unique
+    const reference = `CL-${Date.now()}-${Math.random().toString(36).substr(2, 6).toUpperCase()}`;
+    
+    const tx = await contract.enregistrerPaiement(
+      telephone,
+      operateur,
+      montant,
+      walletDestination || wallet.address,
+      reference
+    );
+    await tx.wait();
+
+    // Enregistrer aussi dans MongoDB comme transaction entrante
+    const newTx = new Transaction({
+      cooperativeId: req.params.id,
+      title: `Paiement ${operateur === 0 ? 'Flooz' : 'T-Money'} - ${telephone}`,
+      amount: montant,
+      type: 'in',
+      status: 'completed',
+      txHash: tx.hash,
+      submittedBy: telephone
+    });
+    await newTx.save();
+
+    // Notifier en temps réel
+    req.io.to(`coop_${req.params.id}`).emit('mobilemoney_recu', {
+      telephone,
+      operateur: operateur === 0 ? 'Flooz' : 'T-Money',
+      montant,
+      reference,
+      txHash: tx.hash
+    });
+
+    res.status(201).json({
+      message: `Paiement ${operateur === 0 ? 'Flooz' : 'T-Money'} enregistré sur la blockchain`,
+      reference,
+      txHash: tx.hash,
+      transaction: newTx
+    });
+  } catch (err) { 
+    res.status(500).json({ error: err.message }); 
+  }
+});
+
+// Transfert du portefeuille coopérative vers un expéditeur
+router.post('/cooperatives/:id/blockchain/transfert', requireAuth, loadCoop, requirePresidentOrAdmin, async (req, res) => {
+  try {
+    const { expediteur, destinataire, montant, motif } = req.body;
+    const contract = getContract('Portefeuille');
+    const tx = await contract.transferer(expediteur, destinataire, montant, motif);
+    await tx.wait();
+
+    // Enregistrer dans MongoDB
+    const newTx = new Transaction({
+      cooperativeId: req.params.id,
+      title: `Transfert: ${motif}`,
+      amount: montant,
+      type: 'out',
+      status: 'completed',
+      txHash: tx.hash,
+      submittedBy: req.user?.name || 'tresorier'
+    });
+    await newTx.save();
+
+    req.io.to(`coop_${req.params.id}`).emit('transfert_effectue', {
+      montant,
+      motif,
+      txHash: tx.hash
+    });
+
+    res.status(201).json({
+      message: 'Transfert enregistré sur la blockchain',
+      txHash: tx.hash,
+      transaction: newTx
+    });
+  } catch (err) { 
+    res.status(500).json({ error: err.message }); 
+  }
+});
+
+// Créer un vote sur la blockchain
+router.post('/cooperatives/:id/blockchain/vote/creer', requireAuth, loadCoop, requirePresidentOrAdmin, async (req, res) => {
+  try {
+    const { description, montant } = req.body;
+    const contract = getContract('Vote');
+    const tx = await contract.creerProposition(description, montant);
+    await tx.wait();
+    res.status(201).json({ 
+      message: 'Proposition de vote créée sur la blockchain',
+      txHash: tx.hash
+    });
+  } catch (err) { 
+    res.status(500).json({ error: err.message }); 
+  }
+});
+
+// Voter sur la blockchain
+router.post('/blockchain/vote/:propositionId/voter', requireAuth, async (req, res) => {
+  try {
+    const { pourOuContre } = req.body;
+    const contract = getContract('Vote');
+    const tx = await contract.voter(req.params.propositionId, pourOuContre);
+    await tx.wait();
+    res.json({ 
+      message: 'Vote enregistré sur la blockchain',
+      txHash: tx.hash
+    });
+  } catch (err) { 
+    res.status(500).json({ error: err.message }); 
+  }
+});
+
 module.exports = router;
 
