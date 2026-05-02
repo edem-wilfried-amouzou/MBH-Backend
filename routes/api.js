@@ -594,6 +594,7 @@ router.post('/cooperatives/:id/members', requireAuth, loadCoop, requirePresident
     const coop = await Cooperative.findById(req.params.id);
     if (!coop) return res.status(404).json({ error: 'Coop not found' });
     const uid = req.body.userId;
+    const role = req.body.role || 'Membre';
     if (!uid || !mongoose.isValidObjectId(String(uid))) {
       return res.status(400).json({ error: 'userId invalide' });
     }
@@ -607,6 +608,11 @@ router.post('/cooperatives/:id/members', requireAuth, loadCoop, requirePresident
     if (!already) {
       coop.members.push(uid);
     }
+
+    if (role) {
+      await User.findByIdAndUpdate(uid, { role }, { upsert: false });
+    }
+
     if (inPending || !already) {
       await coop.save();
       try {
