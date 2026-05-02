@@ -3,7 +3,7 @@ const mongoose = require('mongoose');
 const CooperativeSchema = new mongoose.Schema({
   name: { type: String, required: true },
   description: String,
-  location: { type: String, required: true },
+  location: String,
   cropType: String,
   foundedYear: Number,
   members: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
