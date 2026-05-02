@@ -14,13 +14,13 @@ const server = http.createServer(app);
 // Enable CORS for Socket.IO and Express
 const io = new Server(server, {
   cors: {
-    origin: ["http://localhost:5173","http://localhost:5175", "http://localhost:5174/", "http://localhost:5177", "https://agrilogix-five.vercel.app"],
+    origin: ["https://agrixlogix.vercel.app/","http://localhost:5175", "http://localhost:5174/", "http://localhost:5177", "https://agrilogix-five.vercel.app"],
     methods: ["GET", "POST"]
   }
 });
 
 app.use(cors({
-  origin: ["http://localhost:5173", "http://localhost:5174", "http://localhost:5175", "http://localhost:5174", "https://agrilogix-five.vercel.app"],
+  origin: ["https://agrixlogix.vercel.app/", "http://localhost:5174", "http://localhost:5175", "http://localhost:5174", "https://agrilogix-five.vercel.app"],
   credentials: true
 }));
 app.use(bodyParser.json());
