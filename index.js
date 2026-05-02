@@ -18,11 +18,13 @@ const DEFAULT_WEB_ORIGINS = [
   'https://agrilogix-five.vercel.app',
   'https://agrix-logix.vercel.app',
   'https://agrilogix-ten.vercel.app',
-  'agrixlogix.vercel.app',
+  'https://agrixlogix.vercel.app', // Ajout du https
   'http://localhost:5173',
   'http://localhost:5174',
   'http://localhost:5175',
   'http://localhost:5177',
+  'capacitor://localhost', // Pour les apps mobiles (Ionic/Capacitor)
+  'http://localhost',       // Pour Android/iOS webviews
 ];
 
 /** Domaines frontend autorisés (variable d'environnement, séparateurs virgule). */
@@ -38,9 +40,10 @@ const EXTRA_ORIGINS = parseOriginsCsv(process.env.CORS_ORIGINS);
 const ALLOWED_ORIGINS = [...new Set([...DEFAULT_WEB_ORIGINS, ...EXTRA_ORIGINS])];
 
 function originAllows(origin) {
-  if (!origin) return true; // curl / clients sans en-tête Origin
+  if (!origin) return true; 
   if (ALLOWED_ORIGINS.includes(origin)) return true;
-  if (process.env.CORS_ALLOW_VERCEL_PREVIEW === '1' && /\.vercel\.app$/i.test(origin)) return true;
+  // Autoriser tous les sous-domaines vercel.app par défaut pour faciliter le test
+  if (/\.vercel\.app$/i.test(origin)) return true;
   return false;
 }
 

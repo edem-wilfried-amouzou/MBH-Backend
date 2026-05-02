@@ -263,6 +263,7 @@ router.get('/users', async (req, res) => {
 // COOPERATIVES
 router.post('/cooperatives', requireAuth, async (req, res) => {
   try {
+    console.log('Coop creation request by:', req.user?.name);
     const inviteToken = crypto.randomBytes(24).toString('hex');
     const coop = new Cooperative({
       ...req.body,
@@ -272,8 +273,16 @@ router.post('/cooperatives', requireAuth, async (req, res) => {
       inviteTokenCreatedAt: new Date(),
     });
     await coop.save();
+    
+    // Mettre à jour le rôle de l'utilisateur
+    await User.findByIdAndUpdate(req.user._id, { role: 'Président' });
+    console.log('Coop created and role updated for:', req.user?.name);
+
     res.status(201).json(coop);
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { 
+    console.error('Coop creation error:', err.message);
+    res.status(500).json({ error: err.message }); 
+  }
 });
 
 router.get('/cooperatives', async (req, res) => {
