@@ -1,3 +1,5 @@
+require('dotenv').config();
+
 const express = require('express');
 const cors = require('cors');
 const bodyParser = require('body-parser');
@@ -11,18 +13,52 @@ const User = require('./models/User');
 const app = express();
 const server = http.createServer(app);
 
+const DEFAULT_WEB_ORIGINS = [
+  'https://agrixlogix.vercel.app',
+  'https://agrilogix-five.vercel.app',
+  'https://agrix-logix.vercel.app',
+  'https://agrilogix-ten.vercel.app',
+  'agrixlogix.vercel.app',
+  'http://localhost:5173',
+  'http://localhost:5174',
+  'http://localhost:5175',
+  'http://localhost:5177',
+];
+
+/** Domaines frontend autorisés (variable d'environnement, séparateurs virgule). */
+function parseOriginsCsv(value) {
+  if (!value || typeof value !== 'string') return [];
+  return value
+    .split(',')
+    .map((s) => s.trim().replace(/\/$/, ''))
+    .filter(Boolean);
+}
+
+const EXTRA_ORIGINS = parseOriginsCsv(process.env.CORS_ORIGINS);
+const ALLOWED_ORIGINS = [...new Set([...DEFAULT_WEB_ORIGINS, ...EXTRA_ORIGINS])];
+
+function originAllows(origin) {
+  if (!origin) return true; // curl / clients sans en-tête Origin
+  if (ALLOWED_ORIGINS.includes(origin)) return true;
+  if (process.env.CORS_ALLOW_VERCEL_PREVIEW === '1' && /\.vercel\.app$/i.test(origin)) return true;
+  return false;
+}
+
 // Enable CORS for Socket.IO and Express
 const io = new Server(server, {
   cors: {
-    origin: ["https://agrixlogix.vercel.app", "http://localhost:5173", "http://localhost:5174", "http://localhost:5175", "http://localhost:5177", "https://agrilogix-five.vercel.app"],
-    methods: ["GET", "POST"]
-  }
+    origin: (origin, cb) => cb(null, originAllows(origin)),
+    methods: ['GET', 'POST'],
+    credentials: true,
+  },
 });
 
-app.use(cors({
-  origin: ["https://agrixlogix.vercel.app", "http://localhost:5173", "http://localhost:5174", "http://localhost:5175", "http://localhost:5177", "https://agrilogix-five.vercel.app"],
-  credentials: true
-}));
+app.use(
+  cors({
+    origin: (origin, cb) => cb(null, originAllows(origin)),
+    credentials: true,
+  })
+);
 app.use(bodyParser.json());
 
 // Attach io to req so routes can use it
@@ -93,19 +129,25 @@ io.on('connection', (socket) => {
     socket.currentThread = threadId;
   });
 
-  // User joins a cooperative room to receive new threads
+  // User joins a cooperative room to receive new threads and track online presence
   socket.on('join_coop', (coopId) => {
     if (!socket.user) return;
-    socket.join(`coop_${coopId}`);
+    const room = `coop_${coopId}`;
+    socket.join(room);
     console.log(`User joined coop: ${coopId}`);
+
+    // Notify the room of the new count
+    const count = io.sockets.adapter.rooms.get(room)?.size || 0;
+    io.to(room).emit('online_update', count);
+    socket.currentCoopRoom = room;
   });
 
   socket.on('disconnecting', () => {
     // Before actual disconnect, update counts for all rooms the socket is in
     for (const room of socket.rooms) {
-      if (room !== socket.id) {
+      if (room && room.startsWith('coop_')) {
         const count = (io.sockets.adapter.rooms.get(room)?.size || 1) - 1;
-        io.to(room).emit('online_count', count);
+        io.to(room).emit('online_update', count);
       }
     }
   });

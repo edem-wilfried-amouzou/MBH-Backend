@@ -1,4 +1,6 @@
 const express = require('express');
+const crypto = require('crypto');
+const mongoose = require('mongoose');
 const router = express.Router();
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
@@ -8,8 +10,29 @@ const Transaction = require('../models/Transaction');
 const Vote = require('../models/Vote');
 const Program = require('../models/Program');
 const { ForumThread, ForumPost } = require('../models/Forum');
+const blockchainSvc = require('../blockchain');
+const { anchorCompletedTransaction } = require('../services/blockchainAnchor');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'agrilogix_jwt_secret_2024';
+
+/** Ancre une TX Mongo après passage en statut complété (vote, expiration, …). */
+async function maybeAnchorTransactionMongoId(transactionId) {
+  const id = transactionId && transactionId.toString();
+  if (!id) return null;
+  try {
+    const doc = await Transaction.findById(id);
+    if (!doc || doc.status !== 'completed') return null;
+    const h = await anchorCompletedTransaction(doc);
+    if (h) {
+      doc.txHash = h;
+      await doc.save();
+      return h;
+    }
+  } catch (e) {
+    console.error('[chain] maybeAnchorTransactionMongoId', e?.shortMessage || e?.message || e);
+  }
+  return null;
+}
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/i;
 const PASSWORD_REGEX = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z\d]).{8,64}$/;
 
@@ -75,13 +98,26 @@ function requirePresidentOrAdmin(req, res, next) {
   return res.status(403).json({ error: 'Accès refusé: propriétaire/admin de la coop requis' });
 }
 
+/** Président / admin coop : voir token d’invitation, gérer membres */
+function canManageCoopMembers(user, coop) {
+  const userId = user?._id?.toString();
+  if (!userId || !coop) return false;
+  if (coop.adminId?.toString() === userId) return true;
+  const isMember = coop.members?.some((m) => (m._id ?? m).toString() === userId);
+  if (!isMember) return false;
+  return user.role === 'Admin' || isPresident(user);
+}
+
 router.get('/cooperatives/:id', requireAuth, loadCoop, async (req, res) => {
   try {
     const coop = await Cooperative.findById(req.params.id)
       .populate('members')
       .populate('pendingMembers')
       .populate('adminId');
-    res.json(coop);
+    if (!coop) return res.status(404).json({ error: 'Coop not found' });
+    const o = coop.toObject();
+    if (!canManageCoopMembers(req.user, coop)) delete o.inviteToken;
+    res.json(o);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -227,10 +263,13 @@ router.get('/users', async (req, res) => {
 // COOPERATIVES
 router.post('/cooperatives', requireAuth, async (req, res) => {
   try {
+    const inviteToken = crypto.randomBytes(24).toString('hex');
     const coop = new Cooperative({
       ...req.body,
       adminId: req.user._id,
-      members: [req.user._id]
+      members: [req.user._id],
+      inviteToken,
+      inviteTokenCreatedAt: new Date(),
     });
     await coop.save();
     res.status(201).json(coop);
@@ -298,6 +337,52 @@ router.delete('/cooperatives/:id/members/:userId', requireAuth, loadCoop, requir
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+/** Aperçu public d’une invitation (sans données sensibles) */
+router.get('/invite/:token/info', async (req, res) => {
+  try {
+    const coop = await Cooperative.findOne({ inviteToken: req.params.token })
+      .select('name location cropType _id')
+      .lean();
+    if (!coop) return res.status(404).json({ error: 'Lien d’invitation invalide ou expiré' });
+    res.json({
+      cooperativeId: coop._id,
+      name: coop.name,
+      location: coop.location,
+      cropType: coop.cropType,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/** Connexion requise : rejoindre via token (file d’attente comme /join) */
+router.post('/cooperatives/join-with-invite', requireAuth, async (req, res) => {
+  try {
+    const { token } = req.body;
+    if (!token || typeof token !== 'string') {
+      return res.status(400).json({ error: 'Token d’invitation requis' });
+    }
+    const coop = await Cooperative.findOne({ inviteToken: token.trim() });
+    if (!coop) return res.status(404).json({ error: 'Lien d’invitation invalide' });
+
+    const userId = req.user._id.toString();
+    const isMember = coop.members.some((m) => m.toString() === userId);
+    if (isMember) {
+      return res.status(400).json({ error: 'Vous êtes déjà membre de cette coopérative' });
+    }
+    const isPending = coop.pendingMembers.some((m) => m.toString() === userId);
+    if (isPending) {
+      return res.status(400).json({ error: 'Demande déjà en cours pour cette coopérative' });
+    }
+
+    coop.pendingMembers.push(userId);
+    await coop.save();
+    res.json({ message: 'Demande envoyée', cooperativeId: coop._id.toString(), cooperativeName: coop.name });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 router.post('/cooperatives/:id/join', requireAuth, async (req, res) => {
   try {
     const userId = req.user._id.toString();
@@ -320,6 +405,89 @@ router.post('/cooperatives/:id/join', requireAuth, async (req, res) => {
     await coop.save();
     res.json({ message: 'Demande envoyée' });
   } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+/** Admin / président : (re)générer le lien d’invitation et retourner l’URL suggérée */
+router.post('/cooperatives/:id/invite-link', requireAuth, loadCoop, requirePresidentOrAdmin, async (req, res) => {
+  try {
+    const { regenerate } = req.body || {};
+    const coop = await Cooperative.findById(req.params.id);
+    if (!coop) return res.status(404).json({ error: 'Coop not found' });
+
+    if (!coop.inviteToken || regenerate === true || regenerate === 'true') {
+      coop.inviteToken = crypto.randomBytes(24).toString('hex');
+      coop.inviteTokenCreatedAt = new Date();
+      await coop.save();
+    }
+
+    let baseUrl = process.env.APP_PUBLIC_WEB_URL;
+    if (!baseUrl) {
+      // Détection dynamique basée sur l'origine ou le referer pour éviter localhost sur Vercel
+      const origin = req.get('origin') || req.get('referer');
+      if (origin) {
+        try {
+          const urlObj = new URL(origin);
+          baseUrl = `${urlObj.protocol}//${urlObj.host}`;
+        } catch (e) {
+          baseUrl = origin.replace(/\/$/, '');
+        }
+      } else {
+        baseUrl = 'http://localhost:5173';
+      }
+    }
+    
+    const webJoinUrl = `${baseUrl}/rejoindre?invite=${encodeURIComponent(coop.inviteToken)}`;
+
+    res.json({
+      token: coop.inviteToken,
+      cooperativeId: coop._id.toString(),
+      cooperativeName: coop.name,
+      webJoinUrl,
+      invitePath: `/rejoindre?invite=${encodeURIComponent(coop.inviteToken)}`,
+      createdAt: coop.inviteTokenCreatedAt,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/** Recherche utilisateurs hors coop / hors file (pour ajout admin) — min. 2 caractères sur le nom */
+router.get('/cooperatives/:id/member-candidates', requireAuth, loadCoop, requirePresidentOrAdmin, async (req, res) => {
+  try {
+    const raw = String(req.query.q || '').trim().replace(/\s+/g, ' ');
+    if (raw.length < 2) return res.json([]);
+
+    const coop = await Cooperative.findById(req.params.id).lean();
+    const memberIds = (coop.members || []).map((m) => m.toString());
+    const pendingIds = (coop.pendingMembers || []).map((m) => m.toString());
+
+    const tokens = raw.split(' ').filter(Boolean).map(escapeRegex);
+    const pattern = tokens.map(t => `(?=.*${t})`).join('');
+    const regex = new RegExp(pattern, 'i');
+
+    const users = await User.find({
+      $or: [
+        { name: regex },
+        { phone: new RegExp(escapeRegex(raw), 'i') }
+      ]
+    })
+      .select('name email phone _id')
+      .limit(20)
+      .lean();
+
+    // On ajoute le statut pour chaque utilisateur trouvé
+    const results = users.map(u => {
+      const idStr = u._id.toString();
+      let status = 'available';
+      if (memberIds.includes(idStr)) status = 'already_member';
+      else if (pendingIds.includes(idStr)) status = 'pending';
+      return { ...u, status };
+    });
+
+    res.json(results);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // Get pending members
@@ -371,6 +539,27 @@ router.post('/cooperatives/:id/approve', requireAuth, loadCoop, requirePresident
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// User accepts an invitation from a cooperative
+router.post('/cooperatives/:id/accept-invitation', requireAuth, loadCoop, async (req, res) => {
+  try {
+    const userId = req.user._id.toString();
+    const coop = await Cooperative.findById(req.params.id);
+    
+    // Check if user is in pending
+    const isPending = coop.pendingMembers.some(m => m.toString() === userId);
+    if (!isPending) {
+      return res.status(400).json({ error: "Aucune invitation en attente pour cette coopérative" });
+    }
+    
+    // Move from pending to members
+    coop.pendingMembers = coop.pendingMembers.filter(m => m.toString() !== userId);
+    coop.members.push(userId);
+    await coop.save();
+    
+    res.json({ message: 'Bienvenue dans la coopérative !', cooperative: coop });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 // Reject a member request
 router.post('/cooperatives/:id/reject', requireAuth, loadCoop, requirePresidentOrAdmin, async (req, res) => {
   try {
@@ -394,22 +583,73 @@ router.post('/cooperatives/:id/reject', requireAuth, loadCoop, requirePresidentO
 router.post('/cooperatives/:id/members', requireAuth, loadCoop, requirePresidentOrAdmin, async (req, res) => {
   try {
     const coop = await Cooperative.findById(req.params.id);
-    if (!coop) return res.status(404).json({error: 'Coop not found'});
-    
-    // Legacy support or direct add by admin
-    if (!coop.members.includes(req.body.userId)) {
-      coop.members.push(req.body.userId);
+    if (!coop) return res.status(404).json({ error: 'Coop not found' });
+    const uid = req.body.userId;
+    if (!uid || !mongoose.isValidObjectId(String(uid))) {
+      return res.status(400).json({ error: 'userId invalide' });
+    }
+
+    const idStr = uid.toString();
+    const already = coop.members.some((m) => m.toString() === idStr);
+    const inPending = coop.pendingMembers.some((m) => m.toString() === idStr);
+    if (inPending) {
+      coop.pendingMembers = coop.pendingMembers.filter((m) => m.toString() !== idStr);
+    }
+    if (!already) {
+      coop.members.push(uid);
+    }
+    if (inPending || !already) {
       await coop.save();
       try {
-        if (req.io && req.body.userId) {
-          req.io.to(`user_${req.body.userId}`).emit('membership_update', { coopId: req.params.id, status: 'added' });
+        if (!already && req.io) {
+          req.io.to(`user_${idStr}`).emit('membership_update', { coopId: req.params.id, status: 'added' });
         }
       } catch (e) {
         console.error('Emit membership_update failed', e.message);
       }
     }
-    res.json(coop);
+    const fresh = await Cooperative.findById(req.params.id)
+      .populate('members')
+      .populate('pendingMembers')
+      .populate('adminId');
+    res.json(fresh);
   } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+/** Admin/Président : Créer un utilisateur de zéro et l'ajouter directement à la coop avec un rôle */
+router.post('/cooperatives/:id/members/create', requireAuth, loadCoop, requirePresidentOrAdmin, async (req, res) => {
+  try {
+    const { name, phone, email, role, password } = req.body;
+    const coop = await Cooperative.findById(req.params.id);
+    
+    if (!name?.trim() || !password) {
+      return res.status(400).json({ error: 'Nom et mot de passe requis pour le nouveau membre' });
+    }
+
+    // Vérifier si le nom existe déjà
+    const existing = await User.findOne({ name: name.trim() });
+    if (existing) return res.status(400).json({ error: 'Un utilisateur avec ce nom existe déjà' });
+
+    const hashedPassword = await bcrypt.hash(password, 10);
+    const newUser = new User({
+      name: name.trim(),
+      phone: phone || '',
+      email: email?.trim()?.toLowerCase() || undefined,
+      role: role || 'Membre',
+      password: hashedPassword,
+      emailVerified: true
+    });
+
+    await newUser.save();
+
+    // Ajouter à la coopérative
+    coop.members.push(newUser._id);
+    await coop.save();
+
+    res.status(201).json({ message: 'Membre créé et ajouté', user: { _id: newUser._id, name: newUser.name, role: newUser.role } });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 router.get('/cooperatives/:id/sidebar-stats', requireAuth, loadCoop, requireCoopMember, async (req, res) => {
@@ -460,24 +700,45 @@ router.get('/cooperatives/:id/stats', requireAuth, loadCoop, requireCoopMember, 
       growthRate = 100; // First month with activity
     }
     
-    // Generate more dynamic blockchain metadata
     const seed = coop.name.length + transactions.length;
-    const blockNum = 14592801 + (transactions.length * 12) + (votes.length * 5);
-    const validatorCount = 12 + (seed % 4); // 12-15 validators
-    const consensusScore = 98.4 + (seed % 15) / 10; // 98.4% - 99.9%
-    
+    const blockNumFallback = 14592801 + (transactions.length * 12) + (votes.length * 5);
+    const validatorCount = 12 + (seed % 4);
+    const consensusScore = 98.4 + (seed % 15) / 10;
+
+    let blockchainMeta = {
+      lastBlock: `#${blockNumFallback.toLocaleString('fr-FR')}`,
+      validators: `${validatorCount} / 21`,
+      consensus: `${consensusScore.toFixed(1)}%`,
+      status: blockchainSvc.isAvailable() ? 'Configurer le nœud (en attente données chaîne)' : 'Hors chaîne (démonstration)',
+      onChain: false,
+    };
+
+    if (blockchainSvc.isAvailable()) {
+      try {
+        const hint = await blockchainSvc.fetchLatestBlockHint();
+        const net = process.env.BLOCKCHAIN_NETWORK_LABEL || 'nœud local';
+        if (hint) {
+          blockchainMeta = {
+            ...blockchainMeta,
+            lastBlock: hint.formatted,
+            status: `Connecté (${net})`,
+            chainBlockNumber: hint.blockNumber,
+            onChain: true,
+          };
+        }
+      } catch (e) {
+        blockchainMeta.status = `Nœud indisponible : ${e?.shortMessage || e?.message || 'erreur'}`;
+        blockchainMeta.onChain = false;
+      }
+    }
+
     res.json({
       balance: totalIn - totalOut,
       growthRate: growthRate.toFixed(1),
       totalTransactions: transactions.length,
       activeVotes: votes.length,
       membersCount: coop.members.length,
-      blockchain: {
-        lastBlock: `#${blockNum.toLocaleString()}`,
-        validators: `${validatorCount} / 21`,
-        consensus: `${consensusScore.toFixed(1)}%`,
-        status: "Sécurisé"
-      }
+      blockchain: blockchainMeta,
     });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -697,10 +958,26 @@ router.post('/cooperatives/:id/transactions', requireAuth, loadCoop, requireCoop
       type,
       category,
       submittedBy: req.user?.name || 'user',
-      status: shouldCreateVote ? 'pending' : (type === 'out' ? 'completed' : 'completed'),
-      txHash: '0x' + Math.random().toString(16).substr(2, 40)
+      status: shouldCreateVote ? 'pending' : 'completed',
     });
     await newTx.save();
+
+    if (newTx.status === 'completed') {
+      const chainHash = await anchorCompletedTransaction(newTx);
+      if (chainHash) {
+        newTx.txHash = chainHash;
+        await newTx.save();
+        try {
+          req.io.to(`coop_${coopId}`).emit('blockchain_transaction', {
+            txHash: chainHash,
+            montant: numericAmount,
+            description: title,
+          });
+        } catch (_) {
+          /* ignore */
+        }
+      }
+    }
 
     if (shouldCreateVote) {
       const expiresAt = new Date();
@@ -783,6 +1060,11 @@ router.post('/cooperatives/:id/fake/deposit', requireAuth, loadCoop, requireCoop
     if (!amount || Number(amount) <= 0) return res.status(400).json({ error: 'Montant invalide' });
     const tx = new Transaction({ cooperativeId: coopId, title: title || 'Dépôt fictif', amount: Number(amount), type: 'in', status: 'completed', submittedBy: req.user?.name || 'system' });
     await tx.save();
+    const ch = await anchorCompletedTransaction(tx);
+    if (ch) {
+      tx.txHash = ch;
+      await tx.save();
+    }
     // emit stats update
     try {
       const transactions = await Transaction.find({ cooperativeId: coopId });
@@ -812,8 +1094,15 @@ router.post('/cooperatives/:id/fake/withdraw', requireAuth, loadCoop, requireCoo
     const currentBalance = confirmedIn - confirmedOut;
     if (numericAmount > currentBalance) return res.status(400).json({ error: 'Solde insuffisant pour cette opération' });
     const shouldCreateVote = numericAmount >= 500000;
-    const newTx = new Transaction({ cooperativeId: coopId, title: title || 'Retrait fictif', amount: numericAmount, type: 'out', category: category || 'Autres', submittedBy: req.user?.name || 'system', status: shouldCreateVote ? 'pending' : 'completed', txHash: '0x' + Math.random().toString(16).substr(2, 40) });
+    const newTx = new Transaction({ cooperativeId: coopId, title: title || 'Retrait fictif', amount: numericAmount, type: 'out', category: category || 'Autres', submittedBy: req.user?.name || 'system', status: shouldCreateVote ? 'pending' : 'completed' });
     await newTx.save();
+    if (newTx.status === 'completed') {
+      const ch = await anchorCompletedTransaction(newTx);
+      if (ch) {
+        newTx.txHash = ch;
+        await newTx.save();
+      }
+    }
     if (shouldCreateVote) {
       const expiresAt = new Date(); expiresAt.setHours(expiresAt.getHours() + 1);
       const newVote = new Vote({ cooperativeId: coopId, transactionId: newTx._id, title: `Validation Dépense: ${newTx.title}`, description: `Demande de sortie de fonds d'un montant de ${numericAmount.toLocaleString()} FCFA.`, expiresAt, status: 'active' });
@@ -877,6 +1166,7 @@ router.get('/cooperatives/:id/votes', requireAuth, loadCoop, requireCoopMember, 
           await v.save();
           if (v.transactionId) {
             await Transaction.findByIdAndUpdate(v.transactionId, { status: 'completed' });
+            await maybeAnchorTransactionMongoId(v.transactionId);
             try { // emit realtime update when transaction status changes
               const coopId = v.cooperativeId.toString();
               const transactions = await Transaction.find({ cooperativeId: coopId });
@@ -934,6 +1224,7 @@ router.post('/votes/:id/cast', requireAuth, async (req, res) => {
         voteItem.status = 'approved';
         if (voteItem.transactionId) {
           await Transaction.findByIdAndUpdate(voteItem.transactionId, { status: 'completed' });
+          await maybeAnchorTransactionMongoId(voteItem.transactionId);
           try {
             const coopId = voteItem.cooperativeId.toString();
             const transactions = await Transaction.find({ cooperativeId: coopId });
@@ -984,7 +1275,12 @@ router.get('/cooperatives/:id/forums', requireAuth, loadCoop, requireCoopMember,
 
 router.post('/cooperatives/:id/forums', requireAuth, loadCoop, requireCoopMember, async (req, res) => {
   try {
-    const thread = new ForumThread({ ...req.body, cooperativeId: req.params.id });
+    const thread = new ForumThread({ 
+      ...req.body, 
+      cooperativeId: req.params.id,
+      authorId: req.user._id,
+      authorName: req.user.name
+    });
     await thread.save();
     req.io.to(`coop_${req.params.id}`).emit('new_thread', thread);
     res.status(201).json(thread);
@@ -998,7 +1294,12 @@ router.get('/forums/:threadId/posts', requireAuth, async (req, res) => {
 
 router.post('/forums/:threadId/posts', requireAuth, async (req, res) => {
   try {
-    const post = new ForumPost({ ...req.body, threadId: req.params.threadId });
+    const post = new ForumPost({ 
+      ...req.body, 
+      threadId: req.params.threadId,
+      authorId: req.user._id,
+      authorName: req.user.name
+    });
     await post.save();
     
     // Update thread's updatedAt and increment postCount
@@ -1084,14 +1385,13 @@ router.put('/programmes/:id', async (req, res) => {
 // ═══════════════════════════════════════════════════════════
 // ROUTES BLOCKCHAIN
 // ═══════════════════════════════════════════════════════════
-const { getContract, wallet } = require('../blockchain');
 
 // Enregistrer une transaction sur la blockchain
 router.post('/cooperatives/:id/blockchain/transaction', requireAuth, loadCoop, requireCoopMember, async (req, res) => {
   try {
     const { typeOp, montant, description } = req.body;
     // typeOp: 0=COTISATION, 1=ACHAT, 2=PRIME, 3=REMBOURSEMENT
-    const contract = getContract('CoopLedger');
+    const contract = blockchainSvc.getContract('CoopLedger');
     const tx = await contract.enregistrerTransaction(typeOp, montant, description);
     await tx.wait();
     
@@ -1127,7 +1427,7 @@ router.post('/cooperatives/:id/blockchain/transaction', requireAuth, loadCoop, r
 // Consulter le solde sur la blockchain
 router.get('/cooperatives/:id/blockchain/solde', requireAuth, loadCoop, requireCoopMember, async (req, res) => {
   try {
-    const contract = getContract('CoopLedger');
+    const contract = blockchainSvc.getContract('CoopLedger');
     const solde = await contract.getSolde();
     res.json({ solde: solde.toString() });
   } catch (err) { 
@@ -1138,7 +1438,7 @@ router.get('/cooperatives/:id/blockchain/solde', requireAuth, loadCoop, requireC
 // Récupérer l'historique des transactions blockchain
 router.get('/cooperatives/:id/blockchain/transactions', requireAuth, loadCoop, requireCoopMember, async (req, res) => {
   try {
-    const contract = getContract('CoopLedger');
+    const contract = blockchainSvc.getContract('CoopLedger');
     const nombre = await contract.getNombreTransactions();
     const transactions = [];
     for (let i = 0; i < nombre; i++) {
@@ -1177,13 +1477,13 @@ router.get('/cooperatives/:id/blockchain/transactions', requireAuth, loadCoop, r
 router.post('/cooperatives/:id/blockchain/creer', requireAuth, loadCoop, requirePresidentOrAdmin, async (req, res) => {
   try {
     const { nom } = req.body;
-    const contract = getContract('Cooperative');
+    const contract = blockchainSvc.getContract('Cooperative');
     const tx = await contract.creerCooperative(nom);
     const receipt = await tx.wait();
-    res.json({ 
+    res.json({
       message: 'Coopérative créée sur la blockchain',
       txHash: tx.hash,
-      walletAdresse: wallet.address
+      walletAdresse: blockchainSvc.wallet?.address ?? null,
     });
   } catch (err) { 
     res.status(500).json({ error: err.message }); 
@@ -1195,7 +1495,7 @@ router.post('/cooperatives/:id/blockchain/mobilemoney', requireAuth, loadCoop, r
   try {
     const { telephone, operateur, montant, walletDestination } = req.body;
     // operateur: 0=FLOOZ, 1=TMONEY
-    const contract = getContract('MobileMoney');
+    const contract = blockchainSvc.getContract('MobileMoney');
     
     // Générer une référence unique
     const reference = `CL-${Date.now()}-${Math.random().toString(36).substr(2, 6).toUpperCase()}`;
@@ -1204,7 +1504,7 @@ router.post('/cooperatives/:id/blockchain/mobilemoney', requireAuth, loadCoop, r
       telephone,
       operateur,
       montant,
-      walletDestination || wallet.address,
+      walletDestination || blockchainSvc.wallet?.address,
       reference
     );
     await tx.wait();
@@ -1245,7 +1545,7 @@ router.post('/cooperatives/:id/blockchain/mobilemoney', requireAuth, loadCoop, r
 router.post('/cooperatives/:id/blockchain/transfert', requireAuth, loadCoop, requirePresidentOrAdmin, async (req, res) => {
   try {
     const { expediteur, destinataire, montant, motif } = req.body;
-    const contract = getContract('Portefeuille');
+    const contract = blockchainSvc.getContract('Portefeuille');
     const tx = await contract.transferer(expediteur, destinataire, montant, motif);
     await tx.wait();
 
@@ -1281,7 +1581,7 @@ router.post('/cooperatives/:id/blockchain/transfert', requireAuth, loadCoop, req
 router.post('/cooperatives/:id/blockchain/vote/creer', requireAuth, loadCoop, requirePresidentOrAdmin, async (req, res) => {
   try {
     const { description, montant } = req.body;
-    const contract = getContract('Vote');
+    const contract = blockchainSvc.getContract('Vote');
     const tx = await contract.creerProposition(description, montant);
     const receipt = await tx.wait();
     let propositionId = null;
@@ -1318,7 +1618,7 @@ router.post('/cooperatives/:id/blockchain/vote/creer', requireAuth, loadCoop, re
 router.post('/blockchain/vote/:propositionId/voter', requireAuth, async (req, res) => {
   try {
     const { pourOuContre } = req.body;
-    const contract = getContract('Vote');
+    const contract = blockchainSvc.getContract('Vote');
     const tx = await contract.voter(req.params.propositionId, pourOuContre);
     await tx.wait();
     res.json({ 

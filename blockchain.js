@@ -1,42 +1,145 @@
-const { ethers } = require("ethers");
-const fs = require("fs");
-const path = require("path");
+/**
+ * Ethereum / Hardhat local — ethers v6.
+ * Configurez via variables d'environnement (voir .env.example).
+ * Jamais de clé privée commitée dans le dépôt.
+ */
+const fs = require('fs');
+const path = require('path');
+const { ethers } = require('ethers');
 
-// Chemin vers le projet des contrats
-const CONTRACTS_PATH = "C:/Users/ds pcc/Desktop/cooledger-contracts/cooledger-contracts";
+const DISABLED =
+  process.env.BLOCKCHAIN_DISABLED === '1' ||
+  process.env.BLOCKCHAIN_DISABLED === 'true';
 
-const ADDRESSES = {
-    CoopLedger: "0x5FbDB2315678afecb367f032d93F642f64180aa3",
-    Vote: "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512",
-    Cooperative: "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0",
-    Portefeuille: "0xCf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9",
-    MobileMoney: "0xDc64a140Aa3E981100a9becA4E685f962f0cF6C9",
-};
+let _provider;
+let _wallet;
+const _contracts = new Map();
 
-const PRIVATE_KEY = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
-const RPC_URL = "http://127.0.0.1:8545";
-
-const provider = new ethers.JsonRpcProvider(RPC_URL);
-const wallet = new ethers.Wallet(PRIVATE_KEY, provider);
-
-function getABI(contractName) {
-    const abiPath = path.join(
-        CONTRACTS_PATH,
-        `artifacts/contracts/${contractName}.sol/${contractName}.json`
-    );
-    const artifact = JSON.parse(fs.readFileSync(abiPath, "utf8"));
-    return artifact.abi;
+function loadAddressesJson() {
+  const rawInline = process.env.BLOCKCHAIN_ADDRESSES_JSON;
+  if (rawInline) {
+    try {
+      const j = JSON.parse(rawInline);
+      return j.addresses || j;
+    } catch (_) {
+      return null;
+    }
+  }
+  const fp = process.env.BLOCKCHAIN_ADDRESSES_FILE;
+  if (!fp) return null;
+  const resolved = path.isAbsolute(fp) ? fp : path.join(__dirname, fp);
+  if (!fs.existsSync(resolved)) return null;
+  try {
+    const j = JSON.parse(fs.readFileSync(resolved, 'utf8'));
+    return j.addresses || j;
+  } catch (_) {
+    return null;
+  }
 }
 
+/**
+ * Artefacts Hardhat : …/artifacts/contracts/<Name>.sol/<Name>.json
+ */
+function loadArtifact(contractName) {
+  const root = process.env.BLOCKCHAIN_ARTIFACTS_DIR;
+  if (!root) return null;
+  const artifactPath = path.join(
+    path.resolve(root),
+    'contracts',
+    `${contractName}.sol`,
+    `${contractName}.json`
+  );
+  if (!fs.existsSync(artifactPath)) return null;
+  return JSON.parse(fs.readFileSync(artifactPath, 'utf8'));
+}
+
+function isAvailable() {
+  if (DISABLED) return false;
+  const rpc = process.env.BLOCKCHAIN_RPC_URL;
+  const pk = process.env.BLOCKCHAIN_PRIVATE_KEY;
+  const artDir = process.env.BLOCKCHAIN_ARTIFACTS_DIR;
+  if (!rpc || !pk || !artDir) return false;
+  if (!fs.existsSync(path.resolve(artDir))) return false;
+  const addresses = loadAddressesJson();
+  if (!addresses || !addresses.CoopLedger) return false;
+  return true;
+}
+
+function getProvider() {
+  if (!isAvailable()) return null;
+  if (!_provider) _provider = new ethers.JsonRpcProvider(process.env.BLOCKCHAIN_RPC_URL);
+  return _provider;
+}
+
+function getWallet() {
+  if (!isAvailable()) return null;
+  const p = getProvider();
+  if (!_wallet)
+    _wallet = new ethers.Wallet(process.env.BLOCKCHAIN_PRIVATE_KEY.trim(), p);
+  return _wallet;
+}
+
+function getAddresses() {
+  return loadAddressesJson() || {};
+}
+
+/**
+ * Instance contrat avec signer (pour écritures).
+ * @param {'CoopLedger'|'Vote'|'Cooperative'|'Portefeuille'|'MobileMoney'} contractName
+ */
 function getContract(contractName) {
-    const abi = getABI(contractName);
-    const address = ADDRESSES[contractName];
-    return new ethers.Contract(address, abi, wallet);
+  const w = getWallet();
+  if (!w) throw new Error('Blockchain non configurée (voir .env.example)');
+
+  const cached = _contracts.get(contractName);
+  if (cached) return cached;
+
+  const artifact = loadArtifact(contractName);
+  const addresses = getAddresses();
+  const address = addresses[contractName];
+  if (!artifact?.abi || !address) {
+    throw new Error(`Contrat ou adresse manquante pour ${contractName}`);
+  }
+
+  const c = new ethers.Contract(address, artifact.abi, w);
+  _contracts.set(contractName, c);
+  return c;
 }
 
+async function fetchLatestBlockHint() {
+  const p = getProvider();
+  if (!p) return null;
+  const n = await p.getBlockNumber();
+  return { blockNumber: n, formatted: `#${Number(n).toLocaleString('fr-FR')}` };
+}
+
+/**
+ * CoopLedger.enregistrerTransaction — retourne le hash après minage effectif (.wait())
+ */
+async function recordLedgerTransaction(typeOp, montant, description) {
+  const contract = getContract('CoopLedger');
+  const tx = await contract.enregistrerTransaction(
+    Number(typeOp),
+    BigInt(montant),
+    String(description ?? '')
+  );
+  const waited = await tx.wait();
+  return waited.hash;
+}
+
+/** Compatible ancien code : `const { wallet } = require('../blockchain')` */
 module.exports = {
-    provider,
-    wallet,
-    getContract,
-    ADDRESSES,
+  isAvailable,
+  get provider() {
+    return getProvider();
+  },
+  get wallet() {
+    return getWallet();
+  },
+  getProvider,
+  getWallet,
+  getContract,
+  getAddresses,
+  fetchLatestBlockHint,
+  recordLedgerTransaction,
 };
