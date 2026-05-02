@@ -14,13 +14,13 @@ const server = http.createServer(app);
 // Enable CORS for Socket.IO and Express
 const io = new Server(server, {
   cors: {
-    origin: ["http://localhost:5173", "http://localhost:5175", "https://agrilogix-five.vercel.app"],
+    origin: ["http://localhost:5173","http://localhost:5175", "http://localhost:5174/", "http://localhost:5177", "https://agrilogix-five.vercel.app"],
     methods: ["GET", "POST"]
   }
 });
 
 app.use(cors({
-  origin: ["http://localhost:5173", "http://localhost:5175", "https://agrilogix-five.vercel.app"],
+  origin: ["http://localhost:5173", "http://localhost:5174", "http://localhost:5175", "http://localhost:5174", "https://agrilogix-five.vercel.app"],
   credentials: true
 }));
 app.use(bodyParser.json());
@@ -32,8 +32,22 @@ app.use((req, res, next) => {
 });
 
 // MongoDB Connection
-mongoose.connect('mongodb+srv://credoagotcha_db_user:KUAUbwXyZSvb6HxC@agrilogix.2xeowxj.mongodb.net/').then(() => console.log("MongoDB Connected"))
-  .catch(err => console.log("MongoDB connection error:", err));
+mongoose
+  .connect('mongodb+srv://credoagotcha_db_user:KUAUbwXyZSvb6HxC@agrilogix.2xeowxj.mongodb.net/')
+  .then(async () => {
+    console.log('MongoDB Connected');
+    try {
+      const cleanup = await User.updateMany(
+        { $or: [{ email: null }, { email: '' }] },
+        { $unset: { email: 1 } }
+      );
+      if (cleanup.modifiedCount) console.log(`DB: removed empty email field on ${cleanup.modifiedCount} user(s)`);
+      await User.syncIndexes();
+    } catch (e) {
+      console.warn('User indexes/cleanup:', e.message);
+    }
+  })
+  .catch((err) => console.log('MongoDB connection error:', err));
 
 app.use('/api', apiRoutes);
 app.use('/', apiRoutes); // Mount at root to support /login and /api/login

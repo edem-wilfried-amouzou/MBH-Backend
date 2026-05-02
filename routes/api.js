@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
 const User = require('../models/User');
 const Cooperative = require('../models/Cooperative');
 const Transaction = require('../models/Transaction');
@@ -8,6 +9,7 @@ const Vote = require('../models/Vote');
 const Program = require('../models/Program');
 const { ForumThread, ForumPost } = require('../models/Forum');
 
+const JWT_SECRET = process.env.JWT_SECRET || 'agrilogix_jwt_secret_2024';
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/i;
 const PASSWORD_REGEX = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z\d]).{8,64}$/;
 
@@ -17,6 +19,17 @@ function isPresident(user) {
 
 async function requireAuth(req, res, next) {
   try {
+    // Try JWT Bearer token first (web frontend)
+    const authHeader = req.header('Authorization');
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      const token = authHeader.slice(7);
+      const decoded = jwt.verify(token, JWT_SECRET);
+      const user = await User.findById(decoded.userId);
+      if (!user) return res.status(401).json({ error: 'Utilisateur non trouvé' });
+      req.user = user;
+      return next();
+    }
+    // Fallback: x-user-id header (mobile app)
     const userId = req.header('x-user-id');
     if (!userId) return res.status(401).json({ error: 'Non authentifié' });
     const user = await User.findById(userId);
@@ -24,6 +37,9 @@ async function requireAuth(req, res, next) {
     req.user = user;
     next();
   } catch (err) {
+    if (err.name === 'JsonWebTokenError' || err.name === 'TokenExpiredError') {
+      return res.status(401).json({ error: 'Token invalide ou expiré' });
+    }
     res.status(500).json({ error: err.message });
   }
 }
@@ -111,18 +127,23 @@ router.post('/users', async (req, res) => {
 
     const hashedPassword = await bcrypt.hash(password, 10);
 
-    const user = new User({
+    const doc = {
       name: name.trim(),
-      email: email?.trim() ? email.trim().toLowerCase() : undefined,
       password: hashedPassword,
-      emailVerified: true
-    });
-    
+      emailVerified: true,
+    };
+    if (email?.trim()) {
+      doc.email = email.trim().toLowerCase();
+    }
+
+    const user = new User(doc);
+
     await user.save();
 
-    res.status(201).json({
-      user
-    });
+    const token = jwt.sign({ userId: user._id.toString() }, JWT_SECRET, { expiresIn: '7d' });
+    const userObj = user.toObject();
+    delete userObj.password;
+    res.status(201).json({ token, ...userObj });
   } catch (err) { 
     res.status(500).json({ error: err.message }); 
   }
@@ -150,32 +171,49 @@ router.put('/users/:id', requireAuth, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+function escapeRegex(s) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/** Connexion au nom uniquement (plus d’email). Dernier mot du saisi peut être un préfixe du nom en base (ex. « jean jac » → « Jean Jacques »). */
 router.post('/login', async (req, res) => {
   try {
-    const { email, identifier, name, password } = req.body;
-    console.log('Login attempt:', { identifier, email, name, passwordLength: password?.length });
-    const rawIdentifier = (identifier || name || email || '').trim();
+    const { identifier, name, password } = req.body;
+    const rawIdentifier = (identifier || name || '').trim().replace(/\s+/g, ' ');
+    console.log('Login attempt:', { identifier: rawIdentifier, passwordLength: password?.length });
     if (!rawIdentifier || !password) {
-      return res.status(400).json({ error: 'Identifiant et mot de passe requis' });
+      return res.status(400).json({ error: 'Nom et mot de passe requis' });
     }
-    const query = EMAIL_REGEX.test(rawIdentifier)
-      ? { email: rawIdentifier.toLowerCase() }
-      : { name: new RegExp(`^${rawIdentifier.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') };
-    const user = await User.findOne(query);
-    
+
+    const tokens = rawIdentifier.split(' ').filter(Boolean);
+    let namePattern;
+    if (tokens.length === 1) {
+      namePattern = new RegExp(`^${escapeRegex(tokens[0])}$`, 'i');
+    } else {
+      const fixed = tokens.slice(0, -1).map(escapeRegex).join('\\s+');
+      const last = escapeRegex(tokens[tokens.length - 1]);
+      namePattern = new RegExp(`^${fixed}\\s+${last}\\w*$`, 'i');
+    }
+
+    const user = await User.findOne({ name: namePattern });
+
     if (!user) {
-      console.log(`Login failed: User not found for query:`, query);
-      return res.status(401).json({ error: 'Nom/email ou mot de passe incorrect' });
+      console.log(`Login failed: User not found for name pattern:`, namePattern);
+      return res.status(401).json({ error: 'Nom ou mot de passe incorrect' });
     }
-    
+
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) {
       console.log(`Login failed: Password mismatch for user:`, user.name);
-      return res.status(401).json({ error: 'Nom/email ou mot de passe incorrect' });
+      return res.status(401).json({ error: 'Nom ou mot de passe incorrect' });
     }
     
     console.log(`Login successful:`, user.name);
-    res.json(user);
+    // Issue JWT token
+    const token = jwt.sign({ userId: user._id.toString() }, JWT_SECRET, { expiresIn: '7d' });
+    const userObj = user.toObject();
+    delete userObj.password;
+    res.json({ token, ...userObj });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -804,6 +842,23 @@ router.post('/cooperatives/:id/proposals', requireAuth, loadCoop, requireCoopMem
       status: 'active'
     });
     await newVote.save();
+    try {
+      const coopId = req.params.id;
+      const activeVotes = await Vote.countDocuments({ cooperativeId: coopId, status: 'active' });
+      const transactions = await Transaction.find({ cooperativeId: coopId });
+      const totalIn = transactions.filter((t) => t.status !== 'rejected' && t.type === 'in').reduce((s, t) => s + t.amount, 0);
+      const totalOut = transactions.filter((t) => t.status !== 'rejected' && t.type === 'out').reduce((s, t) => s + t.amount, 0);
+      const coop = await Cooperative.findById(coopId);
+      req.io.to(`coop_${coopId}`).emit('stats_update', {
+        balance: totalIn - totalOut,
+        membersCount: coop.members.length,
+        activeVotes,
+        totalTransactions: transactions.length,
+      });
+      req.io.to(`coop_${coopId}`).emit('vote_update', newVote.toObject ? newVote.toObject() : newVote);
+    } catch (e) {
+      console.error('proposals emit', e.message);
+    }
     res.status(201).json(newVote);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -911,6 +966,12 @@ router.post('/votes/:id/cast', requireAuth, async (req, res) => {
     }
     
     await voteItem.save();
+    try {
+      const coopIdStr = voteItem.cooperativeId.toString();
+      req.io.to(`coop_${coopIdStr}`).emit('vote_update', voteItem.toObject ? voteItem.toObject() : voteItem);
+    } catch (e) {
+      console.error('vote_update emit', e.message);
+    }
     res.json(voteItem);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -1091,6 +1152,21 @@ router.get('/cooperatives/:id/blockchain/transactions', requireAuth, loadCoop, r
         timestamp: new Date(Number(tx.timestamp) * 1000).toISOString()
       });
     }
+    const mongoPool = await Transaction.find({
+      cooperativeId: req.params.id,
+      txHash: { $exists: true, $nin: [null, ''] }
+    }).sort({ date: -1 }).limit(500).lean();
+    for (const row of transactions) {
+      const idx = mongoPool.findIndex(
+        (t) => String(t.amount) === String(row.montant) && String(t.title || '') === String(row.description || '')
+      );
+      if (idx !== -1) {
+        row.txHash = mongoPool[idx].txHash;
+        mongoPool.splice(idx, 1);
+      } else {
+        row.txHash = null;
+      }
+    }
     res.json(transactions);
   } catch (err) { 
     res.status(500).json({ error: err.message }); 
@@ -1207,10 +1283,31 @@ router.post('/cooperatives/:id/blockchain/vote/creer', requireAuth, loadCoop, re
     const { description, montant } = req.body;
     const contract = getContract('Vote');
     const tx = await contract.creerProposition(description, montant);
-    await tx.wait();
+    const receipt = await tx.wait();
+    let propositionId = null;
+    try {
+      for (const log of receipt.logs || []) {
+        try {
+          const parsed = contract.interface.parseLog({ topics: log.topics, data: log.data });
+          const name = parsed?.fragment?.name || parsed?.name;
+          if (name && /proposition/i.test(name)) {
+            const a0 = parsed.args?.id ?? parsed.args?.[0];
+            if (a0 != null) propositionId = typeof a0 === 'bigint' ? a0.toString() : String(a0);
+            break;
+          }
+        } catch (_) { /* not this contract or unknown log */ }
+      }
+    } catch (_) { /* ignore */ }
+    if (propositionId == null) {
+      try {
+        const n = await contract.nombrePropositions();
+        propositionId = (Number(n) - 1).toString();
+      } catch (_) { /* optional method */ }
+    }
     res.status(201).json({ 
       message: 'Proposition de vote créée sur la blockchain',
-      txHash: tx.hash
+      txHash: tx.hash,
+      propositionId
     });
   } catch (err) { 
     res.status(500).json({ error: err.message }); 

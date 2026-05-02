@@ -3,7 +3,7 @@ const fs = require("fs");
 const path = require("path");
 
 // Chemin vers le projet des contrats
-const CONTRACTS_PATH = "C:/Users/DELL/Desktop/cooledger-contracts/cooledger-contracts";
+const CONTRACTS_PATH = "C:/Users/ds pcc/Desktop/cooledger-contracts/cooledger-contracts";
 
 const ADDRESSES = {
     CoopLedger: "0x5FbDB2315678afecb367f032d93F642f64180aa3",
