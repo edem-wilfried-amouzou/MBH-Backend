@@ -429,22 +429,13 @@ router.post('/cooperatives/:id/invite-link', requireAuth, loadCoop, requirePresi
       await coop.save();
     }
 
-    let baseUrl = process.env.APP_PUBLIC_WEB_URL;
-    if (!baseUrl) {
-      // Détection dynamique basée sur l'origine ou le referer pour éviter localhost sur Vercel
-      const origin = req.get('origin') || req.get('referer');
-      if (origin) {
-        try {
-          const urlObj = new URL(origin);
-          baseUrl = `${urlObj.protocol}//${urlObj.host}`;
-        } catch (e) {
-          baseUrl = origin.replace(/\/$/, '');
-        }
-      } else {
-        baseUrl = 'http://localhost:5173';
-      }
+    const defaultPublicUrl = 'https://agrixlogix.vercel.app';
+    let baseUrl = process.env.APP_PUBLIC_WEB_URL || defaultPublicUrl;
+    if (!process.env.APP_PUBLIC_WEB_URL) {
+      // Si aucune URL publique n'est configurée, on utilise la production Vercel.
+      baseUrl = defaultPublicUrl;
     }
-    
+
     const webJoinUrl = `${baseUrl}/rejoindre?invite=${encodeURIComponent(coop.inviteToken)}`;
 
     res.json({

@@ -22,9 +22,7 @@ const DEFAULT_WEB_ORIGINS = [
   'http://localhost:5173',
   'http://localhost:5176',
   'http://localhost:5175',
-  'http://localhost:5177',
-  'capacitor://localhost', // Pour les apps mobiles (Ionic/Capacitor)
-  'http://localhost',       // Pour Android/iOS webviews
+
 ];
 
 /** Domaines frontend autorisés (variable d'environnement, séparateurs virgule). */
