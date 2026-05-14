@@ -101,7 +101,62 @@ function requirePresidentOrAdmin(req, res, next) {
   return res.status(403).json({ error: 'Accès refusé: propriétaire/admin de la coop requis' });
 }
 
+/** Calcule et émet les stats d'une coop en temps réel */
+async function emitCoopStats(io, coopId, userId = null) {
+  if (!io || !coopId) return;
+  try {
+    const [coop, transactions, votes] = await Promise.all([
+      Cooperative.findById(coopId),
+      Transaction.find({ cooperativeId: coopId, status: { $ne: 'rejected' } }),
+      Vote.find({ cooperativeId: coopId, status: 'active' })
+    ]);
+    if (!coop) return;
+
+    let totalIn = 0, totalOut = 0;
+    let currentMonthIn = 0, prevMonthIn = 0;
+    const now = new Date();
+    const currentMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    const prevMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+
+    transactions.forEach(t => {
+      const isEntry = t.type === 'in' || t.type === 'credit' || t.type === 'deposit' || t.type === 'cotisation';
+      if (isEntry) {
+        totalIn += t.amount;
+        const d = new Date(t.date);
+        if (d >= currentMonthStart) currentMonthIn += t.amount;
+        else if (d >= prevMonthStart && d < currentMonthStart) prevMonthIn += t.amount;
+      } else {
+        totalOut += t.amount;
+      }
+    });
+
+    let growthRate = 0;
+    if (prevMonthIn > 0) growthRate = ((currentMonthIn - prevMonthIn) / prevMonthIn) * 100;
+    else if (currentMonthIn > 0) growthRate = 100;
+
+    const statsPayload = {
+      balance: totalIn - totalOut,
+      growthRate: growthRate.toFixed(1),
+      totalTransactions: transactions.length,
+      activeVotes: votes.length,
+      membersCount: coop.members.length,
+    };
+
+    // Si on a un userId, on peut calculer son solde personnel
+    if (userId) {
+      const userContrib = transactions.filter(t => t.status === 'completed' && t.senderId?.toString() === userId.toString() && (t.type === 'in' || t.category === 'Cotisation'));
+      const userWithdraw = transactions.filter(t => t.status === 'completed' && t.receiverId?.toString() === userId.toString() && t.type === 'out');
+      statsPayload.userBalance = userContrib.reduce((s,t)=>s+t.amount,0) - userWithdraw.reduce((s,t)=>s+t.amount,0);
+    }
+
+    io.to(`coop_${coopId}`).emit('stats_update', statsPayload);
+  } catch (err) {
+    console.error('[Socket] emitCoopStats error:', err.message);
+  }
+}
+
 /** Président / admin coop : voir token d’invitation, gérer membres */
+
 function canManageCoopMembers(user, coop) {
   const userId = user?._id?.toString();
   if (!userId || !coop) return false;
@@ -139,92 +194,7 @@ router.get('/me/coops', requireAuth, async (req, res) => {
 });
 
 // COMPTABILITÉ - Récupère le bilan financier et le journal
-router.get('/cooperatives/:id/comptabilite', requireAuth, loadCoop, requireCoopMember, async (req, res) => {
-  try {
-    const transactions = await Transaction.find({ 
-      cooperativeId: req.params.id,
-      status: { $in: ['completed', 'approved', 'success'] }
-    }).sort({ date: -1 });
 
-    const now = new Date();
-    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-
-    const data = {
-      bilan: {
-        solde: 0,
-        totalEntrees: 0,
-        totalSorties: 0,
-        tauxEpargne: 0,
-        nbTransactions: transactions.length
-      },
-      moisCourant: {
-        entrees: 0,
-        sorties: 0,
-        solde: 0
-      },
-      categories: [],
-      journal: []
-    };
-
-    const catMap = {};
-    const CAT_COLORS = {
-      'Cotisation': '#7C3AED',
-      'Investissement': '#10B981',
-      'Dépense': '#EF4444',
-      'Vente': '#F59E0B',
-      'Autre': '#64748B'
-    };
-
-    transactions.forEach(t => {
-      const amount = Number(t.amount);
-      const isEntry = t.type === 'credit' || t.type === 'deposit' || t.type === 'cotisation';
-      const debit = isEntry ? amount : 0;
-      const credit = isEntry ? 0 : amount;
-
-      data.bilan.solde += isEntry ? amount : -amount;
-      if (isEntry) data.bilan.totalEntrees += amount;
-      else data.bilan.totalSorties += amount;
-
-      // Mois courant
-      if (new Date(t.date) >= startOfMonth) {
-        if (isEntry) data.moisCourant.entrees += amount;
-        else data.moisCourant.sorties += amount;
-        data.moisCourant.solde += isEntry ? amount : -amount;
-      }
-
-      // Catégories
-      const cat = t.category || 'Autre';
-      if (!catMap[cat]) {
-        catMap[cat] = { nom: cat, color: CAT_COLORS[cat] || '#94A3B8', entrees: 0, sorties: 0, solde: 0, nb: 0 };
-      }
-      catMap[cat].nb++;
-      if (isEntry) catMap[cat].entrees += amount;
-      else catMap[cat].sorties += amount;
-      catMap[cat].solde += isEntry ? amount : -amount;
-
-      // Journal
-      data.journal.push({
-        date: t.date,
-        libelle: t.description || 'Transaction',
-        categorie: cat,
-        source: t.source || 'Interne',
-        debit,
-        credit,
-        statut: t.status,
-        txHash: t.txHash
-      });
-    });
-
-    data.categories = Object.values(catMap);
-    if (data.bilan.totalEntrees > 0) {
-      data.bilan.tauxEpargne = Math.max(0, Math.round(((data.bilan.totalEntrees - data.bilan.totalSorties) / data.bilan.totalEntrees) * 100));
-    }
-
-    res.json(data);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
 
 // USERS - Registration with automatic credentials
 router.post('/users', async (req, res) => {
@@ -835,12 +805,11 @@ router.get('/cooperatives/:id/stats', requireAuth, loadCoop, requireCoopMember, 
     }
 
     // Calculate user balance
-    const userId = req.user._id;
-    const userIn = transactions.filter(t => t.status === 'completed' && t.receiverId?.toString() === userId.toString());
-    const userOut = transactions.filter(t => t.status === 'completed' && t.senderId?.toString() === userId.toString());
+    const userId = req.user._id.toString();
+    const userContributions = transactions.filter(t => t.status === 'completed' && t.senderId?.toString() === userId && t.type === 'in');
+    const userWithdrawals = transactions.filter(t => t.status === 'completed' && t.receiverId?.toString() === userId && t.type === 'out');
     
-    // Inclure aussi les cotisations du membre s'il est l'auteur (senderId)
-    const userBalance = userIn.reduce((s, t) => s + t.amount, 0) - userOut.reduce((s, t) => s + t.amount, 0);
+    const userBalance = userContributions.reduce((s, t) => s + t.amount, 0) - userWithdrawals.reduce((s, t) => s + t.amount, 0);
 
     res.json({
       balance: totalIn - totalOut,
@@ -1038,98 +1007,73 @@ router.get('/cooperatives/:id/monthly-transactions', requireAuth, loadCoop, requ
 // ═══════════════════════════════════════════════════════════
 // COMPTABILITÉ — Journal + Bilan + Catégories + Mensuel
 // ═══════════════════════════════════════════════════════════
+// COMPTABILITÉ — Journal + Bilan + Catégories + Mensuel
 router.get('/cooperatives/:id/comptabilite', requireAuth, loadCoop, requireCoopMember, async (req, res) => {
   try {
     const coopId = req.params.id;
     const now = new Date();
-
-    // Toutes les transactions non-rejetées
     const allTx = await Transaction.find({ cooperativeId: coopId, status: { $ne: 'rejected' } })
       .sort({ date: -1 }).lean();
 
-    // ── Bilan global ────────────────────────────────────────
     let totalEntrees = 0, totalSorties = 0;
     allTx.forEach(tx => {
-      if (tx.type === 'in')  totalEntrees += tx.amount;
-      if (tx.type === 'out') totalSorties += tx.amount;
+      const isEntry = tx.type === 'in' || tx.type === 'credit' || tx.type === 'deposit' || tx.type === 'cotisation';
+      if (isEntry) totalEntrees += tx.amount;
+      else totalSorties += tx.amount;
     });
-    const solde    = totalEntrees - totalSorties;
+    const solde = totalEntrees - totalSorties;
     const tauxEpargne = totalEntrees > 0 ? ((solde / totalEntrees) * 100).toFixed(1) : '0.0';
 
-    // ── Mois courant ─────────────────────────────────────────
     const debutMois = new Date(now.getFullYear(), now.getMonth(), 1);
     const txMois = allTx.filter(tx => new Date(tx.date) >= debutMois);
     let entreeMois = 0, sortieMois = 0;
     txMois.forEach(tx => {
-      if (tx.type === 'in')  entreeMois += tx.amount;
-      if (tx.type === 'out') sortieMois += tx.amount;
+      const isEntry = tx.type === 'in' || tx.type === 'credit' || tx.type === 'deposit' || tx.type === 'cotisation';
+      if (isEntry) entreeMois += tx.amount;
+      else sortieMois += tx.amount;
     });
 
-    // ── Répartition par catégorie ─────────────────────────────
     const catMap = new Map();
     allTx.forEach(tx => {
       const cat = tx.category || 'Autres';
       if (!catMap.has(cat)) catMap.set(cat, { entrees: 0, sorties: 0, nb: 0 });
       const c = catMap.get(cat);
-      if (tx.type === 'in')  c.entrees += tx.amount;
-      if (tx.type === 'out') c.sorties += tx.amount;
+      const isEntry = tx.type === 'in' || tx.type === 'credit' || tx.type === 'deposit' || tx.type === 'cotisation';
+      if (isEntry) c.entrees += tx.amount;
+      else c.sorties += tx.amount;
       c.nb++;
     });
-    const PALETTE = ['#7c3aed','#a855f7','#c084fc','#4f46e5','#818cf8','#06b6d4','#10b981','#f59e0b'];
-    const categories = Array.from(catMap.entries()).map(([nom, d], i) => ({
-      nom,
-      entrees: d.entrees,
-      sorties: d.sorties,
-      solde: d.entrees - d.sorties,
-      nb: d.nb,
-      color: PALETTE[i % PALETTE.length],
-    })).sort((a, b) => (b.entrees + b.sorties) - (a.entrees + a.sorties));
 
-    // ── Évolution mensuelle (12 derniers mois) ─────────────────
-    const MOIS = ['Jan','Fév','Mar','Avr','Mai','Juin','Juil','Aoû','Sep','Oct','Nov','Déc'];
-    const mensuel = [];
-    for (let i = 11; i >= 0; i--) {
-      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-      const fin = new Date(d.getFullYear(), d.getMonth() + 1, 1);
-      const txs = allTx.filter(tx => {
-        const dt = new Date(tx.date);
-        return dt >= d && dt < fin;
-      });
-      let ent = 0, sor = 0;
-      txs.forEach(tx => {
-        if (tx.type === 'in')  ent += tx.amount;
-        if (tx.type === 'out') sor += tx.amount;
-      });
-      mensuel.push({ mois: MOIS[d.getMonth()], annee: d.getFullYear(), entrees: ent, sorties: sor, solde: ent - sor });
-    }
-
-    // ── Journal (50 dernières écritures) ──────────────────────
-    const journal = allTx.slice(0, 50).map(tx => ({
-      id: tx._id,
-      date: tx.date,
-      libelle: tx.title,
-      categorie: tx.category || 'Autres',
-      debit:  tx.type === 'out' ? tx.amount : 0,
-      credit: tx.type === 'in'  ? tx.amount : 0,
-      soldeApres: null, // calculé en front
-      statut: tx.status,
-      txHash: tx.txHash || null,
-      fedapayId: tx.fedapayId || null,
-      source: tx.fedapayId ? 'FedaPay' : tx.submittedBy || 'Manuel',
-    }));
+    const journal = allTx.slice(0, 50).map(tx => {
+      const isEntry = tx.type === 'in' || tx.type === 'credit' || tx.type === 'deposit' || tx.type === 'cotisation';
+      return {
+        id: tx._id,
+        date: tx.date,
+        libelle: tx.title,
+        categorie: tx.category || 'Autres',
+        debit:  !isEntry ? tx.amount : 0,
+        credit: isEntry  ? tx.amount : 0,
+        statut: tx.status,
+        txHash: tx.txHash || null,
+        fedapayId: tx.fedapayId || null,
+        source: tx.fedapayId ? 'FedaPay' : tx.submittedBy || 'Manuel',
+      };
+    });
 
     res.json({
       bilan: { totalEntrees, totalSorties, solde, tauxEpargne: Number(tauxEpargne), nbTransactions: allTx.length },
       moisCourant: { entrees: entreeMois, sorties: sortieMois, solde: entreeMois - sortieMois, nb: txMois.length },
-      categories,
-      mensuel,
-      journal,
+      categories: Array.from(catMap.entries()).map(([nom, d], i) => ({
+        nom, entrees: d.entrees, sorties: d.sorties, solde: d.entrees - d.sorties, nb: d.nb,
+        color: ['#7c3aed','#10b981','#ef4444','#f59e0b','#64748b'][i % 5]
+      })),
+      journal
     });
   } catch (err) {
-    console.error('[comptabilite]', err.message);
     res.status(500).json({ error: err.message });
   }
 });
+
 
 // TRANSACTIONS
 router.get('/cooperatives/:id/transactions', requireAuth, loadCoop, requireCoopMember, async (req, res) => {
@@ -2148,7 +2092,9 @@ router.post('/payments/fedapay/callback', async (req, res) => {
           await anchorCompletedTransaction(tx).catch(() => {});
           console.log('[FedaPay Callback] Transaction enregistrée:', tx._id);
 
-          // Notification temps réel si possible
+          // Notification temps réel (Helper centralisé)
+          await emitCoopStats(req.io, cooperativeId);
+
           if (req.io) {
             req.io.to(`coop_${cooperativeId}`).emit('stats_update', { 
               newTransaction: tx,
@@ -2215,13 +2161,17 @@ router.post('/payments/fedapay/confirm-contribution', requireAuth, async (req, r
     await tx.save();
     await anchorCompletedTransaction(tx).catch(() => {});
 
-    // Notification temps réel
+    // Notification temps réel (Helper centralisé)
+    await emitCoopStats(req.io, cooperativeId, req.user._id);
+    
+    // Notification spécifique pour le message
     if (req.io) {
       req.io.to(`coop_${cooperativeId}`).emit('stats_update', { 
         newTransaction: tx,
         message: `Cotisation de ${req.user.name} confirmée (${tx.amount} FCFA)` 
       });
     }
+
 
     res.status(201).json({ message: 'Cotisation confirmée', transaction: tx });
 
@@ -2247,6 +2197,10 @@ router.post('/cooperatives/:id/contribute', requireAuth, async (req, res) => {
     });
     await tx.save();
     await maybeAnchorTransactionMongoId(tx._id);
+
+    // Notification temps réel
+    await emitCoopStats(req.io, req.params.id, req.user._id);
+
     res.status(201).json(tx);
   } catch (err) {
     res.status(500).json({ error: err.message });
