@@ -2105,12 +2105,18 @@ router.post('/payments/fedapay/callback', async (req, res) => {
     const sig = req.headers['x-fedapay-signature'];
     const secret = process.env.FEDAPAY_WEBHOOK_SECRET;
     
+    // Log complet pour diagnostic
+    console.log('[FedaPay Callback] ====== WEBHOOK REÇU ======');
+    console.log('[FedaPay Callback] Headers:', JSON.stringify(req.headers, null, 2));
+    console.log('[FedaPay Callback] Body brut:', JSON.stringify(req.body, null, 2));
+    
     // FedaPay envoie souvent les données dans req.body.entity pour les webhooks
     const data = req.body.entity || req.body;
     const { id: fedapayTxId, status, amount, description, custom_metadata } = data;
     
-    console.log('[FedaPay Callback] Received Event:', req.body.event || 'unknown');
-    console.log('[FedaPay Callback] Data:', { fedapayTxId, status, amount, metadata: custom_metadata });
+    console.log('[FedaPay Callback] Event:', req.body.event || 'unknown');
+    console.log('[FedaPay Callback] TX:', { fedapayTxId, status, amount, custom_metadata });
+
 
     if (status === 'approved') {
       const cooperativeId = custom_metadata?.cooperativeId || null;
