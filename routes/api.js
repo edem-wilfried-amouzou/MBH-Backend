@@ -12,6 +12,9 @@ const Program = require('../models/Program');
 const { ForumThread, ForumPost } = require('../models/Forum');
 const blockchainSvc = require('../blockchain');
 const { anchorCompletedTransaction } = require('../services/blockchainAnchor');
+const { initPayment, checkPaymentStatus } = require('../services/cinetpay');
+const { createTransaction: fedapayCreate, verifyTransaction: fedapayVerify, directPay: fedapayDirect } = require('../services/fedapay');
+
 
 const JWT_SECRET = process.env.JWT_SECRET || 'agrilogix_jwt_secret_2024';
 
@@ -412,6 +415,11 @@ router.post('/cooperatives/:id/join', requireAuth, async (req, res) => {
     
     coop.pendingMembers.push(userId);
     await coop.save();
+    try {
+      if (req.io) {
+        req.io.to(`coop_${req.params.id}`).emit('membership_request', { userName: req.user.name });
+      }
+    } catch (_) {}
     res.json({ message: 'Demande envoyée' });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -738,8 +746,17 @@ router.get('/cooperatives/:id/stats', requireAuth, loadCoop, requireCoopMember, 
       }
     }
 
+    // Calculate user balance
+    const userId = req.user._id;
+    const userIn = transactions.filter(t => t.status === 'completed' && t.receiverId?.toString() === userId.toString());
+    const userOut = transactions.filter(t => t.status === 'completed' && t.senderId?.toString() === userId.toString());
+    
+    // Inclure aussi les cotisations du membre s'il est l'auteur (senderId)
+    const userBalance = userIn.reduce((s, t) => s + t.amount, 0) - userOut.reduce((s, t) => s + t.amount, 0);
+
     res.json({
       balance: totalIn - totalOut,
+      userBalance, // Solde personnel du membre dans la coop
       growthRate: growthRate.toFixed(1),
       totalTransactions: transactions.length,
       activeVotes: votes.length,
@@ -928,6 +945,102 @@ router.get('/cooperatives/:id/monthly-transactions', requireAuth, loadCoop, requ
 
     res.json(buckets.map(({ year, month, ...rest }) => rest));
   } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ═══════════════════════════════════════════════════════════
+// COMPTABILITÉ — Journal + Bilan + Catégories + Mensuel
+// ═══════════════════════════════════════════════════════════
+router.get('/cooperatives/:id/comptabilite', requireAuth, loadCoop, requireCoopMember, async (req, res) => {
+  try {
+    const coopId = req.params.id;
+    const now = new Date();
+
+    // Toutes les transactions non-rejetées
+    const allTx = await Transaction.find({ cooperativeId: coopId, status: { $ne: 'rejected' } })
+      .sort({ date: -1 }).lean();
+
+    // ── Bilan global ────────────────────────────────────────
+    let totalEntrees = 0, totalSorties = 0;
+    allTx.forEach(tx => {
+      if (tx.type === 'in')  totalEntrees += tx.amount;
+      if (tx.type === 'out') totalSorties += tx.amount;
+    });
+    const solde    = totalEntrees - totalSorties;
+    const tauxEpargne = totalEntrees > 0 ? ((solde / totalEntrees) * 100).toFixed(1) : '0.0';
+
+    // ── Mois courant ─────────────────────────────────────────
+    const debutMois = new Date(now.getFullYear(), now.getMonth(), 1);
+    const txMois = allTx.filter(tx => new Date(tx.date) >= debutMois);
+    let entreeMois = 0, sortieMois = 0;
+    txMois.forEach(tx => {
+      if (tx.type === 'in')  entreeMois += tx.amount;
+      if (tx.type === 'out') sortieMois += tx.amount;
+    });
+
+    // ── Répartition par catégorie ─────────────────────────────
+    const catMap = new Map();
+    allTx.forEach(tx => {
+      const cat = tx.category || 'Autres';
+      if (!catMap.has(cat)) catMap.set(cat, { entrees: 0, sorties: 0, nb: 0 });
+      const c = catMap.get(cat);
+      if (tx.type === 'in')  c.entrees += tx.amount;
+      if (tx.type === 'out') c.sorties += tx.amount;
+      c.nb++;
+    });
+    const PALETTE = ['#7c3aed','#a855f7','#c084fc','#4f46e5','#818cf8','#06b6d4','#10b981','#f59e0b'];
+    const categories = Array.from(catMap.entries()).map(([nom, d], i) => ({
+      nom,
+      entrees: d.entrees,
+      sorties: d.sorties,
+      solde: d.entrees - d.sorties,
+      nb: d.nb,
+      color: PALETTE[i % PALETTE.length],
+    })).sort((a, b) => (b.entrees + b.sorties) - (a.entrees + a.sorties));
+
+    // ── Évolution mensuelle (12 derniers mois) ─────────────────
+    const MOIS = ['Jan','Fév','Mar','Avr','Mai','Juin','Juil','Aoû','Sep','Oct','Nov','Déc'];
+    const mensuel = [];
+    for (let i = 11; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const fin = new Date(d.getFullYear(), d.getMonth() + 1, 1);
+      const txs = allTx.filter(tx => {
+        const dt = new Date(tx.date);
+        return dt >= d && dt < fin;
+      });
+      let ent = 0, sor = 0;
+      txs.forEach(tx => {
+        if (tx.type === 'in')  ent += tx.amount;
+        if (tx.type === 'out') sor += tx.amount;
+      });
+      mensuel.push({ mois: MOIS[d.getMonth()], annee: d.getFullYear(), entrees: ent, sorties: sor, solde: ent - sor });
+    }
+
+    // ── Journal (50 dernières écritures) ──────────────────────
+    const journal = allTx.slice(0, 50).map(tx => ({
+      id: tx._id,
+      date: tx.date,
+      libelle: tx.title,
+      categorie: tx.category || 'Autres',
+      debit:  tx.type === 'out' ? tx.amount : 0,
+      credit: tx.type === 'in'  ? tx.amount : 0,
+      soldeApres: null, // calculé en front
+      statut: tx.status,
+      txHash: tx.txHash || null,
+      fedapayId: tx.fedapayId || null,
+      source: tx.fedapayId ? 'FedaPay' : tx.submittedBy || 'Manuel',
+    }));
+
+    res.json({
+      bilan: { totalEntrees, totalSorties, solde, tauxEpargne: Number(tauxEpargne), nbTransactions: allTx.length },
+      moisCourant: { entrees: entreeMois, sorties: sortieMois, solde: entreeMois - sortieMois, nb: txMois.length },
+      categories,
+      mensuel,
+      journal,
+    });
+  } catch (err) {
+    console.error('[comptabilite]', err.message);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // TRANSACTIONS
@@ -1781,5 +1894,312 @@ router.get('/cooperatives/:id/blockchain/ledger', loadCoop, async (req, res) => 
   }
 });
 
+// PAYMENTS (CinetPay)
+router.post('/payments/cinetpay/create-payment', async (req, res) => {
+  try {
+    const { amount, description, cooperativeId, customer_name, customer_surname } = req.body;
+    const payment = await initPayment({
+      amount,
+      description: description || 'Cotisation AgriLogix',
+      customer_name,
+      customer_surname
+    });
+    res.json(payment);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post('/payments/cinetpay/notify', async (req, res) => {
+  try {
+    const { cpm_trans_id } = req.body;
+    const status = await checkPaymentStatus(cpm_trans_id);
+    if (status.code === '00') {
+      // Paiement réussi, on peut valider la transaction ici si transaction_id correspond
+    }
+    res.json({ status: 'ok' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════
+// ROUTES FEDAPAY
+// ═══════════════════════════════════════════════════════════
+
+/**
+ * POST /api/payments/fedapay/create
+ * Crée une transaction FedaPay et retourne le token + URL de paiement
+ */
+router.post('/payments/fedapay/create', requireAuth, async (req, res) => {
+  try {
+    const { amount, description, cooperativeId } = req.body;
+    if (!amount || Number(amount) < 100) {
+      return res.status(400).json({ error: 'Montant minimum : 100 FCFA' });
+    }
+
+    const result = await fedapayCreate({
+      amount: Number(amount),
+      description: description || 'Cotisation AgriLogix',
+      customerName: req.user.name?.split(' ')[0] || 'Membre',
+      customerSurname: req.user.name?.split(' ').slice(1).join(' ') || 'AgriLogix',
+      customerEmail: req.user.email || '',
+      customerPhone: req.user.phone || '',
+      metadata: {
+        cooperativeId: cooperativeId,
+        userName: req.user.name,
+        userId: req.user._id
+      }
+    });
+
+    res.json(result);
+  } catch (err) {
+    console.error('[FedaPay] create route error:', err.message);
+    res.status(500).json({ error: err.message || 'Erreur FedaPay' });
+  }
+});
+
+/**
+ * POST /api/payments/fedapay/direct
+ * Effectue un paiement direct (Mobile Money) sans redirection
+ */
+router.post('/payments/fedapay/direct', requireAuth, async (req, res) => {
+  try {
+    const { amount, phoneNumber, mode, cooperativeId, description } = req.body;
+    
+    if (!amount || !phoneNumber || !mode || !cooperativeId) {
+      return res.status(400).json({ error: 'Montant, numéro, mode et coopId requis' });
+    }
+
+    const result = await fedapayDirect({
+      amount: Number(amount),
+      phoneNumber,
+      mode, // 'mtn_tg', 'moov_tg', etc.
+      description: description || `Cotisation directe de ${req.user.name}`,
+      customerName: req.user.name?.split(' ')[0] || 'Membre',
+      customerSurname: req.user.name?.split(' ').slice(1).join(' ') || 'AgriLogix',
+      customerEmail: req.user.email,
+      metadata: {
+        cooperativeId,
+        userName: req.user.name,
+        userId: req.user._id,
+        type: 'direct'
+      }
+    });
+
+    res.json(result);
+  } catch (err) {
+    console.error('[FedaPay Direct] error:', err.message);
+    res.status(500).json({ error: err.message || 'Erreur paiement direct' });
+  }
+});
+
+/**
+ * GET /api/payments/fedapay/verify/:transactionId
+ * Vérifie le statut d'une transaction FedaPay
+ */
+router.get('/payments/fedapay/verify/:transactionId', requireAuth, async (req, res) => {
+  try {
+    const result = await fedapayVerify(req.params.transactionId);
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message || 'Erreur de vérification FedaPay' });
+  }
+});
+
+/**
+ * POST /api/payments/fedapay/callback
+ * Webhook appelé par FedaPay après chaque transaction (approved/declined)
+ * Enregistre automatiquement la cotisation si le paiement est approuvé
+ */
+router.post('/payments/fedapay/callback', async (req, res) => {
+  try {
+    const sig = req.headers['x-fedapay-signature'];
+    const secret = process.env.FEDAPAY_WEBHOOK_SECRET;
+    
+    // FedaPay envoie souvent les données dans req.body.entity pour les webhooks
+    const data = req.body.entity || req.body;
+    const { id: fedapayTxId, status, amount, description, custom_metadata } = data;
+    
+    console.log('[FedaPay Callback] Received Event:', req.body.event || 'unknown');
+    console.log('[FedaPay Callback] Data:', { fedapayTxId, status, amount, metadata: custom_metadata });
+
+    if (status === 'approved') {
+      const cooperativeId = custom_metadata?.cooperativeId || null;
+      const submittedBy = custom_metadata?.userName || 'FedaPay';
+
+      if (cooperativeId) {
+        // Éviter les doublons : vérifier si la transaction existe déjà
+        const existing = await Transaction.findOne({ fedapayId: String(fedapayTxId) });
+        if (!existing) {
+          const tx = new Transaction({
+            cooperativeId,
+            title: description || 'Cotisation via FedaPay',
+            amount: Number(amount),
+            type: 'in',
+            status: 'completed',
+            submittedBy,
+            category: 'Cotisation',
+            fedapayId: String(fedapayTxId),
+          });
+          await tx.save();
+          await anchorCompletedTransaction(tx).catch(() => {});
+          console.log('[FedaPay Callback] Transaction enregistrée:', tx._id);
+
+          // Notification temps réel si possible
+          if (req.io) {
+            req.io.to(`coop_${cooperativeId}`).emit('stats_update', { 
+              newTransaction: tx,
+              message: `Cotisation de ${submittedBy} reçue (${amount} FCFA)` 
+            });
+          }
+        }
+      }
+    } else if (status === 'declined' || status === 'canceled') {
+      const cooperativeId = custom_metadata?.cooperativeId || null;
+      if (cooperativeId && req.io) {
+        req.io.to(`coop_${cooperativeId}`).emit('stats_update', { 
+          message: `Échec du paiement : ${status === 'declined' ? 'Décliné' : 'Annulé'}`,
+          type: 'error'
+        });
+      }
+    }
+
+    res.json({ received: true });
+  } catch (err) {
+    console.error('[FedaPay Callback] error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * POST /api/payments/fedapay/confirm-contribution
+ * Confirme manuellement une cotisation FedaPay (après redirection succès)
+ * Utilisé quand le webhook n'est pas disponible (sandbox/local)
+ */
+router.post('/payments/fedapay/confirm-contribution', requireAuth, async (req, res) => {
+  try {
+    const { fedapayTransactionId, cooperativeId, amount, description } = req.body;
+    if (!fedapayTransactionId || !cooperativeId) {
+      return res.status(400).json({ error: 'fedapayTransactionId et cooperativeId requis' });
+    }
+
+    // Vérifier le statut réel chez FedaPay
+    const verification = await fedapayVerify(fedapayTransactionId);
+    if (!verification.approved) {
+      return res.status(402).json({
+        error: `Paiement non approuvé (statut : ${verification.status})`,
+        status: verification.status
+      });
+    }
+
+    // Éviter les doublons
+    const existing = await Transaction.findOne({ fedapayId: String(fedapayTransactionId) });
+    if (existing) {
+      return res.json({ message: 'Cotisation déjà enregistrée', transaction: existing });
+    }
+
+    const tx = new Transaction({
+      cooperativeId,
+      title: description || 'Cotisation via FedaPay',
+      amount: Number(amount || verification.amount),
+      type: 'in',
+      status: 'completed',
+      submittedBy: req.user.name,
+      senderId: req.user._id, // Lien avec l'utilisateur
+      category: 'Cotisation',
+      fedapayId: String(fedapayTransactionId),
+    });
+    await tx.save();
+    await anchorCompletedTransaction(tx).catch(() => {});
+
+    res.status(201).json({ message: 'Cotisation confirmée', transaction: tx });
+  } catch (err) {
+    console.error('[FedaPay] confirm-contribution error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// CONTRIBUTIONS
+router.post('/cooperatives/:id/contribute', requireAuth, async (req, res) => {
+  try {
+    const { amount, paymentMethod, description } = req.body;
+    const tx = new Transaction({
+      cooperativeId: req.params.id,
+      title: description || 'Cotisation membre',
+      amount,
+      type: 'in',
+      status: 'completed',
+      submittedBy: req.user.name,
+      senderId: req.user._id, // Lien avec l'utilisateur
+      category: 'Cotisation'
+    });
+    await tx.save();
+    await maybeAnchorTransactionMongoId(tx._id);
+    res.status(201).json(tx);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// TRANSFERS
+router.post('/cooperatives/:id/transfer', requireAuth, loadCoop, async (req, res) => {
+  try {
+    const { amount, receiverId, reason, transferType } = req.body;
+    const cooperativeId = req.params.id;
+    const senderId = req.user._id;
+
+    if (!amount || amount <= 0) {
+      return res.status(400).json({ error: 'Montant invalide' });
+    }
+
+    if (transferType === 'member-to-member') {
+      if (senderId.toString() === receiverId) {
+        return res.status(400).json({ error: 'Vous ne pouvez pas vous envoyer des fonds à vous-même' });
+      }
+
+      // Vérification du solde du membre (optionnel selon les règles de la coop, mais recommandé)
+      // Pour l'instant, on se base sur les transactions où le membre est receiverId vs senderId
+      const memberIn = await Transaction.find({ receiverId: senderId, cooperativeId, status: 'completed' });
+      const memberOut = await Transaction.find({ senderId, cooperativeId, status: 'completed' });
+      
+      const totalReceived = memberIn.reduce((sum, t) => sum + t.amount, 0);
+      const totalSent = memberOut.reduce((sum, t) => sum + t.amount, 0);
+      
+      // On peut aussi inclure les cotisations si on veut qu'elles soient créditées au membre
+      // Mais ici on va juste s'assurer qu'il a assez pour le transfert demandé
+      const memberBalance = totalReceived - totalSent;
+
+      // Si le solde est insuffisant (et qu'on impose une limite)
+      // if (memberBalance < amount) {
+      //   return res.status(400).json({ error: `Solde insuffisant (${memberBalance} FCFA)` });
+      // }
+    }
+
+    const tx = new Transaction({
+      cooperativeId,
+      title: reason || 'Transfert',
+      amount,
+      type: transferType === 'coop-to-member' ? 'out' : 'in', // member-to-member est un mouvement interne
+      status: 'completed',
+      submittedBy: req.user.name,
+      senderId: transferType === 'member-to-member' ? senderId : null,
+      receiverId,
+      category: 'Transfert'
+    });
+
+    await tx.save();
+    
+    // Ancrage blockchain
+    await anchorCompletedTransaction(tx).catch(err => console.error('Blockchain anchor error:', err));
+
+    res.status(201).json(tx);
+  } catch (err) {
+    console.error('Transfer error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;
+
 

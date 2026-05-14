@@ -18,10 +18,10 @@ const DEFAULT_WEB_ORIGINS = [
   'https://agrilogix-five.vercel.app',
   'https://agrix-logix.vercel.app',
   'https://agrilogix-ten.vercel.app',
-  'https://agrixlogix.vercel.app', // Ajout du https
+  'https://agrixlogix.vercel.app', 
   'http://localhost:5173',
-  'http://localhost:5176',
-  'http://localhost:5175',
+  'http://localhost:5174',
+  'http://localhost:5177',
 
 ];
 
@@ -70,7 +70,7 @@ app.use((req, res, next) => {
 
 // MongoDB Connection
 mongoose
-  .connect('mongodb+srv://credoagotcha_db_user:KUAUbwXyZSvb6HxC@agrilogix.2xeowxj.mongodb.net/')
+  .connect(process.env.MONGO_URI_LOCAL)
   .then(async () => {
     console.log('MongoDB Connected');
     try {

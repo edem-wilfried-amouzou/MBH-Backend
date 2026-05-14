@@ -8,11 +8,15 @@ const TransactionSchema = new mongoose.Schema({
   type: { type: String, enum: ['in', 'out'], required: true },
   category: String,
   submittedBy: String,
+  senderId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+  receiverId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
   status: { type: String, enum: ['completed', 'pending', 'rejected'], default: 'completed' },
   txHash: { type: String, sparse: true },
   previousHash: { type: String, default: '0' },
   nonce: { type: Number, default: 0 },
-  date: { type: Date, default: Date.now }
+  date: { type: Date, default: Date.now },
+  fedapayId: { type: String, sparse: true, index: true },  // ID de transaction FedaPay (déduplication)
+  cinetpayId: { type: String, sparse: true, index: true },  // ID de transaction CinetPay
 });
 
 // Calcul du hash SHA-256 du bloc
