@@ -122,28 +122,22 @@ const directPay = async ({
     const tokenObj = await transaction.generateToken();
     const token = tokenObj.token;
 
-    console.log('[FedaPay Direct] TX:', transaction.id, '| Token:', token.substring(0, 20) + '...');
+    console.log('[FedaPay Direct] TX:', transaction.id, '| Mode:', mode);
 
-    // 3. Déclencher le paiement Mobile Money via axios (sendNowWithToken retourne 404 sur ce SDK)
-    const axios = require('axios');
-    const payRes = await axios.post(
-      `https://${isSandbox ? 'sandbox-' : ''}api.fedapay.com/v1/transactions/${transaction.id}/pay`,
-      { token, mode, phone_number: { number: phoneNumber, country } },
-      {
-        headers: {
-          Authorization: `Bearer ${process.env.FEDAPAY_SECRET_KEY}`,
-          'Content-Type': 'application/json',
-        },
-        httpsAgent: isSandbox ? new https.Agent({ rejectUnauthorized: false }) : undefined,
-      }
-    );
+    // 3. Déclencher le paiement Mobile Money via le SDK
+    const payRes = await transaction.sendNowWithToken(mode, token, {
+      number: phoneNumber,
+      country
+    });
+
     console.log('[FedaPay Direct] Paiement initié:', transaction.id);
     return {
       transaction_id: transaction.id,
       status: 'pending',
       amount: Number(amount),
-      response: payRes.data,
+      response: payRes,
     };
+
   } catch (error) {
     const msg = error.message || 'Erreur paiement direct';
     console.error('[FedaPay] directPay error:', msg);
