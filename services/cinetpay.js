@@ -1,17 +1,24 @@
 const { CinetPayClient } = require('cinetpay-js');
 
-const client = new CinetPayClient({
-  credentials: {
-    TG: {
-      apiKey: process.env.CINETPAY_API_KEY_TG,
-      apiPassword: process.env.CINETPAY_API_PASSWORD_TG,
-    }
-  },
-  baseUrl: process.env.CINETPAY_API_KEY_TG?.startsWith('sk_live_') 
-    ? 'https://api.cinetpay.co' 
-    : 'https://api.cinetpay.net',
-  debug: true
-});
+let _client = null;
+
+function getClient() {
+  if (_client) return _client;
+  const apiKey = process.env.CINETPAY_API_KEY_TG;
+  const apiPassword = process.env.CINETPAY_API_PASSWORD_TG;
+  if (!apiKey || !apiPassword) {
+    throw new Error('CinetPay: variables CINETPAY_API_KEY_TG / CINETPAY_API_PASSWORD_TG manquantes');
+  }
+  _client = new CinetPayClient({
+    credentials: {
+      TG: { apiKey, apiPassword }
+    },
+    baseUrl: 'https://api.cinetpay.co',
+    debug: false
+  });
+  return _client;
+}
+
 
 
 

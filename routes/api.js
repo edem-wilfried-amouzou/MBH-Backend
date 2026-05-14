@@ -12,7 +12,7 @@ const Program = require('../models/Program');
 const { ForumThread, ForumPost } = require('../models/Forum');
 const blockchainSvc = require('../blockchain');
 const { anchorCompletedTransaction } = require('../services/blockchainAnchor');
-const { initPayment, checkPaymentStatus } = require('../services/cinetpay');
+// CinetPay non utilisé — FedaPay uniquement
 const { createTransaction: fedapayCreate, verifyTransaction: fedapayVerify, directPay: fedapayDirect } = require('../services/fedapay');
 
 
