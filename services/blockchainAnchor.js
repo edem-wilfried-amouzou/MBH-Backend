@@ -27,7 +27,8 @@ function mongoToTypeOp(type, category = '', title = '') {
  * @returns {Promise<string|null>} txHash ou null si hors chaîne / erreur
  */
 async function anchorCompletedTransaction(txDoc) {
-  if (!blockchain.isAvailable()) return null;
+  if (!blockchain.canWrite()) return null;
+
   if (!txDoc || txDoc.status !== 'completed') return null;
   if (isProbablyOnChainHash(txDoc.txHash)) return txDoc.txHash;
 

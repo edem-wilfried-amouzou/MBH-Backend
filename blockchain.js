@@ -41,29 +41,40 @@ function loadAddressesJson() {
  * Artefacts Hardhat : …/artifacts/contracts/<Name>.sol/<Name>.json
  */
 function loadArtifact(contractName) {
+  // 1. Chercher d'abord dans le dossier config/abi du projet (Cloud-ready)
+  const internalPath = path.join(__dirname, 'config', 'abi', `${contractName}.json`);
+  if (fs.existsSync(internalPath)) {
+    return JSON.parse(fs.readFileSync(internalPath, 'utf8'));
+  }
+
+  // 2. Fallback sur le dossier d'artefacts Hardhat (Local dev)
   const root = process.env.BLOCKCHAIN_ARTIFACTS_DIR;
-  if (!root) return null;
-  const artifactPath = path.join(
-    path.resolve(root),
-    'contracts',
-    `${contractName}.sol`,
-    `${contractName}.json`
-  );
-  if (!fs.existsSync(artifactPath)) return null;
-  return JSON.parse(fs.readFileSync(artifactPath, 'utf8'));
+  if (root) {
+    const artifactPath = path.join(
+      path.resolve(root),
+      'contracts',
+      `${contractName}.sol`,
+      `${contractName}.json`
+    );
+    if (fs.existsSync(artifactPath)) {
+      return JSON.parse(fs.readFileSync(artifactPath, 'utf8'));
+    }
+  }
+  return null;
 }
 
 function isAvailable() {
   if (DISABLED) return false;
   const rpc = process.env.BLOCKCHAIN_RPC_URL;
-  const pk = process.env.BLOCKCHAIN_PRIVATE_KEY;
-  const artDir = process.env.BLOCKCHAIN_ARTIFACTS_DIR;
-  if (!rpc || !pk || !artDir) return false;
-  if (!fs.existsSync(path.resolve(artDir))) return false;
-  const addresses = loadAddressesJson();
-  if (!addresses || !addresses.CoopLedger) return false;
-  return true;
+  // Disponible en lecture si on a un RPC
+  return !!rpc;
 }
+
+function canWrite() {
+  const pk = process.env.BLOCKCHAIN_PRIVATE_KEY;
+  return isAvailable() && !!pk && pk.length > 10;
+}
+
 
 function getProvider() {
   if (!isAvailable()) return null;
@@ -72,12 +83,13 @@ function getProvider() {
 }
 
 function getWallet() {
-  if (!isAvailable()) return null;
+  if (!canWrite()) return null;
   const p = getProvider();
   if (!_wallet)
     _wallet = new ethers.Wallet(process.env.BLOCKCHAIN_PRIVATE_KEY.trim(), p);
   return _wallet;
 }
+
 
 function getAddresses() {
   return loadAddressesJson() || {};
@@ -130,6 +142,7 @@ async function recordLedgerTransaction(typeOp, montant, description) {
 /** Compatible ancien code : `const { wallet } = require('../blockchain')` */
 module.exports = {
   isAvailable,
+  canWrite,
   get provider() {
     return getProvider();
   },
@@ -143,3 +156,4 @@ module.exports = {
   fetchLatestBlockHint,
   recordLedgerTransaction,
 };
+

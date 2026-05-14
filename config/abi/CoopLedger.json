@@ -1,0 +1,27 @@
+{
+  "abi": [
+    {
+      "inputs": [
+        { "internalType": "uint8", "name": "typeOp", "type": "uint8" },
+        { "internalType": "uint256", "name": "montant", "type": "uint256" },
+        { "internalType": "string", "name": "description", "type": "string" }
+      ],
+      "name": "enregistrerTransaction",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        { "indexed": true, "internalType": "address", "name": "auteur", "type": "address" },
+        { "indexed": false, "internalType": "uint8", "name": "typeOp", "type": "uint8" },
+        { "indexed": false, "internalType": "uint256", "name": "montant", "type": "uint256" },
+        { "indexed": false, "internalType": "string", "name": "description", "type": "string" },
+        { "indexed": false, "internalType": "uint256", "name": "timestamp", "type": "uint256" }
+      ],
+      "name": "TransactionEnregistree",
+      "type": "event"
+    }
+  ]
+}

@@ -781,9 +781,10 @@ router.get('/cooperatives/:id/stats', requireAuth, loadCoop, requireCoopMember, 
       lastBlock: `#${blockNumFallback.toLocaleString('fr-FR')}`,
       validators: `${validatorCount} / 21`,
       consensus: `${consensusScore.toFixed(1)}%`,
-      status: blockchainSvc.isAvailable() ? 'Configurer le nœud (en attente données chaîne)' : 'Hors chaîne (démonstration)',
-      onChain: false,
+      status: blockchainSvc.canWrite() ? `Opérationnel (${process.env.BLOCKCHAIN_NETWORK_LABEL || 'Réseau'})` : 'Connecté (Lecture seule / Démo)',
+      onChain: blockchainSvc.isAvailable(),
     };
+
 
     if (blockchainSvc.isAvailable()) {
       try {
