@@ -2096,6 +2096,14 @@ router.get('/payments/fedapay/verify/:transactionId', requireAuth, async (req, r
 });
 
 /**
+ * GET /api/payments/fedapay/callback
+ * Permet de vérifier que l'URL est accessible
+ */
+router.get('/payments/fedapay/callback', (req, res) => {
+  res.send('FedaPay Webhook is active (Use POST for actual payments)');
+});
+
+/**
  * POST /api/payments/fedapay/callback
  * Webhook appelé par FedaPay après chaque transaction (approved/declined)
  * Enregistre automatiquement la cotisation si le paiement est approuvé
