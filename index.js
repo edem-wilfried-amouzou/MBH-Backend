@@ -70,7 +70,7 @@ app.use((req, res, next) => {
 
 // MongoDB Connection
 mongoose
-  .connect(process.env.MONGO_URI_LOCAL)
+  .connect(process.env.MONGO_URI || process.env.MONGO_URI_LOCAL)
   .then(async () => {
     console.log('MongoDB Connected');
     try {
