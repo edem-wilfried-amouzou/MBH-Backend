@@ -138,6 +138,94 @@ router.get('/me/coops', requireAuth, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// COMPTABILITÉ - Récupère le bilan financier et le journal
+router.get('/cooperatives/:id/comptabilite', requireAuth, loadCoop, requireCoopMember, async (req, res) => {
+  try {
+    const transactions = await Transaction.find({ 
+      cooperativeId: req.params.id,
+      status: { $in: ['completed', 'approved', 'success'] }
+    }).sort({ date: -1 });
+
+    const now = new Date();
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+
+    const data = {
+      bilan: {
+        solde: 0,
+        totalEntrees: 0,
+        totalSorties: 0,
+        tauxEpargne: 0,
+        nbTransactions: transactions.length
+      },
+      moisCourant: {
+        entrees: 0,
+        sorties: 0,
+        solde: 0
+      },
+      categories: [],
+      journal: []
+    };
+
+    const catMap = {};
+    const CAT_COLORS = {
+      'Cotisation': '#7C3AED',
+      'Investissement': '#10B981',
+      'Dépense': '#EF4444',
+      'Vente': '#F59E0B',
+      'Autre': '#64748B'
+    };
+
+    transactions.forEach(t => {
+      const amount = Number(t.amount);
+      const isEntry = t.type === 'credit' || t.type === 'deposit' || t.type === 'cotisation';
+      const debit = isEntry ? amount : 0;
+      const credit = isEntry ? 0 : amount;
+
+      data.bilan.solde += isEntry ? amount : -amount;
+      if (isEntry) data.bilan.totalEntrees += amount;
+      else data.bilan.totalSorties += amount;
+
+      // Mois courant
+      if (new Date(t.date) >= startOfMonth) {
+        if (isEntry) data.moisCourant.entrees += amount;
+        else data.moisCourant.sorties += amount;
+        data.moisCourant.solde += isEntry ? amount : -amount;
+      }
+
+      // Catégories
+      const cat = t.category || 'Autre';
+      if (!catMap[cat]) {
+        catMap[cat] = { nom: cat, color: CAT_COLORS[cat] || '#94A3B8', entrees: 0, sorties: 0, solde: 0, nb: 0 };
+      }
+      catMap[cat].nb++;
+      if (isEntry) catMap[cat].entrees += amount;
+      else catMap[cat].sorties += amount;
+      catMap[cat].solde += isEntry ? amount : -amount;
+
+      // Journal
+      data.journal.push({
+        date: t.date,
+        libelle: t.description || 'Transaction',
+        categorie: cat,
+        source: t.source || 'Interne',
+        debit,
+        credit,
+        statut: t.status,
+        txHash: t.txHash
+      });
+    });
+
+    data.categories = Object.values(catMap);
+    if (data.bilan.totalEntrees > 0) {
+      data.bilan.tauxEpargne = Math.max(0, Math.round(((data.bilan.totalEntrees - data.bilan.totalSorties) / data.bilan.totalEntrees) * 100));
+    }
+
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // USERS - Registration with automatic credentials
 router.post('/users', async (req, res) => {
   try {
