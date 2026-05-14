@@ -2215,7 +2215,16 @@ router.post('/payments/fedapay/confirm-contribution', requireAuth, async (req, r
     await tx.save();
     await anchorCompletedTransaction(tx).catch(() => {});
 
+    // Notification temps réel
+    if (req.io) {
+      req.io.to(`coop_${cooperativeId}`).emit('stats_update', { 
+        newTransaction: tx,
+        message: `Cotisation de ${req.user.name} confirmée (${tx.amount} FCFA)` 
+      });
+    }
+
     res.status(201).json({ message: 'Cotisation confirmée', transaction: tx });
+
   } catch (err) {
     console.error('[FedaPay] confirm-contribution error:', err.message);
     res.status(500).json({ error: err.message });
