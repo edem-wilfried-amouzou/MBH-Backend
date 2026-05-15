@@ -882,30 +882,31 @@ router.get('/cooperatives/:id/stats', requireAuth, loadCoop, requireCoopMember, 
     
     let totalIn = 0;
     let totalOut = 0;
-    let currentMonthIn = 0;
-    let prevMonthIn = 0;
+    let prevBalance = 0;
     
     const now = new Date();
     const currentMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-    const prevMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
     
     transactions.forEach(t => {
       if (t.status === 'rejected') return;
       if (t.type === 'in') {
         totalIn += t.amount;
-        const d = new Date(t.date);
-        if (d >= currentMonthStart) currentMonthIn += t.amount;
-        else if (d >= prevMonthStart && d < currentMonthStart) prevMonthIn += t.amount;
+      } else if (t.type === 'out') {
+        totalOut += t.amount;
       }
-      if (t.type === 'out') totalOut += t.amount;
+      
+      const d = new Date(t.date);
+      if (d < currentMonthStart) {
+        if (t.type === 'in') prevBalance += t.amount;
+        else if (t.type === 'out') prevBalance -= t.amount;
+      }
     });
     
-    // Calculate growth rate
+    const currentBalance = totalIn - totalOut;
     let growthRate = 0;
-    if (prevMonthIn > 0) {
-      growthRate = ((currentMonthIn - prevMonthIn) / prevMonthIn) * 100;
-    } else if (currentMonthIn > 0) {
-      growthRate = 100; // First month with activity
+    
+    if (prevBalance !== 0) {
+      growthRate = ((currentBalance - prevBalance) / Math.abs(prevBalance)) * 100;
     }
     
     const seed = coop.name.length + transactions.length;
