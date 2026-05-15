@@ -5,7 +5,7 @@ const TransactionSchema = new mongoose.Schema({
   cooperativeId: { type: mongoose.Schema.Types.ObjectId, ref: 'Cooperative', required: true },
   title: { type: String, required: true },
   amount: { type: Number, required: true },
-  type: { type: String, enum: ['in', 'out'], required: true },
+  type: { type: String, enum: ['in', 'out', 'cotisation', 'deposit', 'credit'], required: true },
   category: String,
   submittedBy: String,
   senderId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },

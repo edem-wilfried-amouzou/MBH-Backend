@@ -1165,13 +1165,15 @@ router.post('/cooperatives/:id/transactions', requireAuth, loadCoop, requireCoop
       const prevMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
       transactions.forEach(t => {
         if (t.status === 'rejected') return;
-        if (t.type === 'in') {
+        const isEntry = t.type === 'in' || t.type === 'credit' || t.type === 'deposit' || t.type === 'cotisation';
+        if (isEntry) {
           totalIn += t.amount;
           const d = new Date(t.date);
           if (d >= currentMonthStart) currentMonthIn += t.amount;
           else if (d >= prevMonthStart && d < currentMonthStart) prevMonthIn += t.amount;
+        } else {
+          totalOut += t.amount;
         }
-        if (t.type === 'out') totalOut += t.amount;
       });
       let growthRate = 0;
       if (prevMonthIn > 0) growthRate = ((currentMonthIn - prevMonthIn) / prevMonthIn) * 100;
