@@ -76,9 +76,29 @@ function canWrite() {
 }
 
 
+// Liste des RPC de secours pour éviter les erreurs ECONNRESET
+const FALLBACK_RPCS = [
+  process.env.BLOCKCHAIN_RPC_URL,
+  'https://polygon-amoy.drpc.org',
+  'https://rpc-amoy.polygon.technology',
+  'https://polygon-amoy-bor-rpc.publicnode.com'
+].filter(Boolean);
+
+let _currentRpcIndex = 0;
+
 function getProvider() {
   if (!isAvailable()) return null;
-  if (!_provider) _provider = new ethers.JsonRpcProvider(process.env.BLOCKCHAIN_RPC_URL);
+  if (!_provider) {
+    const rpcUrl = FALLBACK_RPCS[_currentRpcIndex];
+    try {
+      // staticNetwork: true évite que ethers essaie de redétecter le réseau à chaque requête
+      _provider = new ethers.JsonRpcProvider(rpcUrl, undefined, { staticNetwork: true });
+    } catch (err) {
+      console.error(`[Blockchain] Échec RPC ${rpcUrl}, tentative suivante...`);
+      _currentRpcIndex = (_currentRpcIndex + 1) % FALLBACK_RPCS.length;
+      return getProvider(); // Récursif pour essayer le suivant
+    }
+  }
   return _provider;
 }
 

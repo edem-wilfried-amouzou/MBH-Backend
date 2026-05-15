@@ -1970,6 +1970,9 @@ router.post('/payments/fedapay/create', requireAuth, async (req, res) => {
     if (!amount || Number(amount) < 100) {
       return res.status(400).json({ error: 'Montant minimum : 100 FCFA' });
     }
+    // Détection dynamique de l'URL de retour (localhost ou production)
+    const origin = req.get('origin') || process.env.APP_PUBLIC_WEB_URL || 'https://agrixlogix.vercel.app';
+    const callbackUrl = `${origin.replace(/\/$/, '')}/dashboard?payment=success`;
 
     const result = await fedapayCreate({
       amount: Number(amount),
@@ -1978,6 +1981,7 @@ router.post('/payments/fedapay/create', requireAuth, async (req, res) => {
       customerSurname: req.user.name?.split(' ').slice(1).join(' ') || 'AgriLogix',
       customerEmail: req.user.email || '',
       customerPhone: req.user.phone || '',
+      callbackUrl,
       metadata: {
         cooperativeId: cooperativeId,
         userName: req.user.name,
@@ -1986,6 +1990,7 @@ router.post('/payments/fedapay/create', requireAuth, async (req, res) => {
     });
 
     res.json(result);
+
   } catch (err) {
     console.error('[FedaPay] create route error:', err.message);
     res.status(500).json({ error: err.message || 'Erreur FedaPay' });
@@ -2086,6 +2091,7 @@ router.post('/payments/fedapay/callback', async (req, res) => {
             type: 'in',
             status: 'completed',
             submittedBy,
+            senderId: custom_metadata?.userId || null,
             category: 'Cotisation',
             fedapayId: String(fedapayTxId),
           });
@@ -2164,6 +2170,8 @@ router.post('/payments/fedapay/confirm-contribution', requireAuth, async (req, r
 
     // Notification temps réel (Helper centralisé)
     await emitCoopStats(req.io, cooperativeId, req.user._id);
+    
+    console.log('[FedaPay] Cotisation confirmée pour l\'utilisateur:', req.user._id);
     
     // Notification spécifique pour le message
     if (req.io) {
