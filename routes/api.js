@@ -142,11 +142,14 @@ async function emitCoopStats(io, coopId, userId = null) {
       membersCount: coop.members.length,
     };
 
-    // Si on a un userId, on peut calculer son solde personnel
+    // Si on a un userId, on peut calculer son solde personnel (Solde Théorique / Contributions)
     if (userId) {
-      const userContrib = transactions.filter(t => t.status === 'completed' && t.senderId?.toString() === userId.toString() && (t.type === 'in' || t.category === 'Cotisation'));
-      const userWithdraw = transactions.filter(t => t.status === 'completed' && t.receiverId?.toString() === userId.toString() && t.type === 'out');
-      statsPayload.userBalance = userContrib.reduce((s,t)=>s+t.amount,0) - userWithdraw.reduce((s,t)=>s+t.amount,0);
+      const userContrib = transactions.filter(t => 
+        t.status === 'completed' && 
+        t.senderId?.toString() === userId.toString() && 
+        (t.type === 'in' || t.category === 'Cotisation' || t.type === 'cotisation' || t.type === 'deposit')
+      );
+      statsPayload.userBalance = userContrib.reduce((s, t) => s + t.amount, 0);
     }
 
     io.to(`coop_${coopId}`).emit('stats_update', statsPayload);
@@ -805,12 +808,15 @@ router.get('/cooperatives/:id/stats', requireAuth, loadCoop, requireCoopMember, 
       }
     }
 
-    // Calculate user balance
+    // Calculate user balance (Theoretical / Total Contributions)
     const userId = req.user._id.toString();
-    const userContributions = transactions.filter(t => t.status === 'completed' && t.senderId?.toString() === userId && t.type === 'in');
-    const userWithdrawals = transactions.filter(t => t.status === 'completed' && t.receiverId?.toString() === userId && t.type === 'out');
+    const userContributions = transactions.filter(t => 
+      t.status === 'completed' && 
+      t.senderId?.toString() === userId && 
+      (t.type === 'in' || t.category === 'Cotisation' || t.type === 'cotisation' || t.type === 'deposit')
+    );
     
-    const userBalance = userContributions.reduce((s, t) => s + t.amount, 0) - userWithdrawals.reduce((s, t) => s + t.amount, 0);
+    const userBalance = userContributions.reduce((s, t) => s + t.amount, 0);
 
     res.json({
       balance: totalIn - totalOut,
