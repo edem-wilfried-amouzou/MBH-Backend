@@ -2039,7 +2039,7 @@ router.get('/cooperatives/:id/blockchain/export', requireAuth, loadCoop, async (
 
 
 // Route de synchronisation pour sceller les anciennes transactions (Admin)
-router.post('/cooperatives/:id/blockchain/sync', loadCoop, requirePresidentOrAdmin, async (req, res) => {
+router.post('/cooperatives/:id/blockchain/sync', requireAuth, loadCoop, requirePresidentOrAdmin, async (req, res) => {
   try {
     // On trie de manière déterministe
     const transactions = await Transaction.find({ cooperativeId: req.params.id }).sort({ date: 1, _id: 1 });
