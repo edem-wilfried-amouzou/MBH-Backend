@@ -17,6 +17,7 @@
     "express": "^4.22.1",
     "fedapay": "^1.2.5",
     "jsonwebtoken": "^9.0.3",
+    "libphonenumber-js": "^1.13.2",
     "mongoose": "^9.6.1",
     "paydunya": "^1.0.12",
     "socket.io": "^4.8.3",

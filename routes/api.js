@@ -11,6 +11,7 @@ const Vote = require('../models/Vote');
 const Program = require('../models/Program');
 const { ForumThread, ForumPost } = require('../models/Forum');
 const blockchainSvc = require('../blockchain');
+const { parsePhoneNumberFromString } = require('libphonenumber-js');
 
 // Health & Config Debug (Safe summary)
 router.get('/health', (req, res) => {
@@ -26,6 +27,28 @@ router.get('/health', (req, res) => {
     },
     mongodb: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected'
   });
+});
+
+/** Vérification internationale de numéro de téléphone */
+router.post('/verify-phone', (req, res) => {
+  try {
+    const { phone, country } = req.body;
+    if (!phone) return res.status(400).json({ error: 'Numéro de téléphone requis' });
+
+    const phoneNumber = parsePhoneNumberFromString(phone, country || 'TG'); // Par défaut Togo
+    if (!phoneNumber) {
+      return res.json({ valid: false, error: 'Format invalide' });
+    }
+
+    res.json({
+      valid: phoneNumber.isValid(),
+      formatted: phoneNumber.formatInternational(),
+      country: phoneNumber.country,
+      type: phoneNumber.getType(), // e.g. 'MOBILE', 'FIXED_LINE'
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 const { anchorCompletedTransaction } = require('../services/blockchainAnchor');
@@ -271,6 +294,10 @@ router.post('/users', async (req, res) => {
       const existingByEmail = await User.findOne({ email: email.trim().toLowerCase() });
       if (existingByEmail) return res.status(400).json({ error: 'Email déjà utilisé' });
     }
+    if (phone?.trim()) {
+      const existingByPhone = await User.findOne({ phone: phone.trim() });
+      if (existingByPhone) return res.status(400).json({ error: 'Numéro de téléphone déjà utilisé' });
+    }
 
     const hashedPassword = await bcrypt.hash(password, 10);
 
@@ -313,6 +340,17 @@ router.put('/users/:id', requireAuth, async (req, res) => {
     if (requesterId !== targetId) {
       return res.status(403).json({ error: 'Accès refusé: modification du profil non autorisée' });
     }
+
+    // Check for uniqueness of email/phone if changed
+    if (email?.trim()) {
+      const other = await User.findOne({ email: email.trim().toLowerCase(), _id: { $ne: targetId } });
+      if (other) return res.status(400).json({ error: 'Email déjà utilisé par un autre compte' });
+    }
+    if (phone?.trim()) {
+      const other = await User.findOne({ phone: phone.trim(), _id: { $ne: targetId } });
+      if (other) return res.status(400).json({ error: 'Numéro de téléphone déjà utilisé par un autre compte' });
+    }
+
     const user = await User.findByIdAndUpdate(targetId, { name, phone, address, email, profession, bio }, { new: true });
     res.json(user);
   } catch (err) { res.status(500).json({ error: err.message }); }
