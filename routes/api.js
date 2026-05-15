@@ -13,6 +13,54 @@ const { ForumThread, ForumPost } = require('../models/Forum');
 const blockchainSvc = require('../blockchain');
 const { parsePhoneNumberFromString } = require('libphonenumber-js');
 
+/** Détection de l'opérateur Mobile Money selon le préfixe */
+const MM_OPERATORS = {
+  'TG': [ // Togo
+    { name: 'Togocom (TMoney)', prefix: ['90', '91', '92', '93', '70'], color: '#EE7F00' },
+    { name: 'Moov (Flooz)', prefix: ['98', '99', '97', '79'], color: '#005CAB' }
+  ],
+  'BJ': [ // Bénin
+    { name: 'MTN Mobile Money', prefix: ['61', '62', '66', '67', '69', '90', '91', '96', '97', '51', '52', '53', '54'], color: '#FFCC00' },
+    { name: 'Moov Money', prefix: ['94', '95', '60', '63', '64', '65', '68'], color: '#005CAB' },
+    { name: 'Celtiis', prefix: ['40', '41', '42'], color: '#E30613' }
+  ],
+  'CI': [ // Côte d'Ivoire
+    { name: 'Orange Money', prefix: ['07', '08', '09', '47', '48', '49', '57', '58', '59', '67', '68', '69', '77', '78', '79', '87', '88', '89', '97', '98'], color: '#FF7900' },
+    { name: 'MTN MoMo', prefix: ['05', '45', '55', '65', '75', '85', '95'], color: '#FFCC00' },
+    { name: 'Moov Money', prefix: ['01', '41', '51', '71'], color: '#005CAB' }
+  ],
+  'SN': [ // Sénégal
+    { name: 'Orange Money', prefix: ['77', '78'], color: '#FF7900' },
+    { name: 'Free Money', prefix: ['76'], color: '#EE3524' },
+    { name: 'Expresso', prefix: ['70'], color: '#005CAB' },
+    { name: 'Wave', prefix: ['77', '78', '76', '70'], color: '#1E90FF' }
+  ]
+};
+
+router.post('/detect-operator', (req, res) => {
+  try {
+    const { phone, country = 'TG' } = req.body;
+    if (!phone) return res.status(400).json({ error: 'Numéro requis' });
+
+    // Nettoyer le numéro (enlever + et indicatif pays)
+    let cleanPhone = phone.replace(/\s/g, '').replace(/^\+\d{1,3}/, '');
+    
+    // Si le numéro commence par un 0, on l'enlève (format local)
+    if (cleanPhone.startsWith('0')) cleanPhone = cleanPhone.substring(1);
+
+    const operators = MM_OPERATORS[country] || MM_OPERATORS['TG'];
+    const operator = operators.find(op => op.prefix.some(p => cleanPhone.startsWith(p)));
+
+    if (operator) {
+      res.json({ found: true, ...operator });
+    } else {
+      res.json({ found: false, message: 'Opérateur non détecté' });
+    }
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Health & Config Debug (Safe summary)
 router.get('/health', (req, res) => {
   res.json({
