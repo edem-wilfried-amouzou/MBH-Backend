@@ -1944,7 +1944,7 @@ router.post('/blockchain/vote/:propositionId/voter', requireAuth, async (req, re
 // --- BLOCKCHAIN INTEGRITY & AUDIT ROUTES ---
 router.get('/cooperatives/:id/blockchain/verify', loadCoop, async (req, res) => {
   try {
-    const transactions = await Transaction.find({ cooperativeId: req.params.id }).sort({ date: 1 });
+    const transactions = await Transaction.find({ cooperativeId: req.params.id }).sort({ date: 1, _id: 1 });
     if (transactions.length === 0) {
       return res.json({ isValid: true, message: "Registre vide (Chaîne intègre)" });
     }
@@ -1995,7 +1995,7 @@ router.get('/cooperatives/:id/blockchain/verify', loadCoop, async (req, res) => 
 
 router.get('/cooperatives/:id/blockchain/export', requireAuth, loadCoop, async (req, res) => {
   try {
-    const transactions = await Transaction.find({ cooperativeId: req.params.id }).sort({ date: 1 });
+    const transactions = await Transaction.find({ cooperativeId: req.params.id }).sort({ date: 1, _id: 1 });
     
     // Header CSV
     let csv = 'ID,Titre,Date,Montant,Type,Hash Blockchain,Status,Integrite\n';
@@ -2041,7 +2041,7 @@ router.get('/cooperatives/:id/blockchain/export', requireAuth, loadCoop, async (
 // Route de synchronisation pour sceller les anciennes transactions (Admin)
 router.post('/cooperatives/:id/blockchain/sync', loadCoop, requirePresidentOrAdmin, async (req, res) => {
   try {
-    const transactions = await Transaction.find({ cooperativeId: req.params.id }).sort({ date: 1 });
+    const transactions = await Transaction.find({ cooperativeId: req.params.id }).sort({ date: 1, _id: 1 });
     let lastHash = '0';
     let syncedCount = 0;
 
