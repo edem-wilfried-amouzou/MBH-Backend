@@ -1,0 +1,292 @@
+{
+  "abi": [
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "id",
+          "type": "uint256"
+        },
+        {
+          "indexed": false,
+          "internalType": "string",
+          "name": "nom",
+          "type": "string"
+        },
+        {
+          "indexed": false,
+          "internalType": "address",
+          "name": "walletAdresse",
+          "type": "address"
+        },
+        {
+          "indexed": false,
+          "internalType": "address",
+          "name": "tresorier",
+          "type": "address"
+        }
+      ],
+      "name": "CooperativeCreee",
+      "type": "event"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "cooperativeId",
+          "type": "uint256"
+        },
+        {
+          "indexed": false,
+          "internalType": "address",
+          "name": "membreAdresse",
+          "type": "address"
+        },
+        {
+          "indexed": false,
+          "internalType": "string",
+          "name": "nom",
+          "type": "string"
+        }
+      ],
+      "name": "MembreAjoute",
+      "type": "event"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint256",
+          "name": "cooperativeId",
+          "type": "uint256"
+        },
+        {
+          "internalType": "address",
+          "name": "membreAdresse",
+          "type": "address"
+        },
+        {
+          "internalType": "string",
+          "name": "nom",
+          "type": "string"
+        }
+      ],
+      "name": "ajouterMembre",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint256",
+          "name": "",
+          "type": "uint256"
+        }
+      ],
+      "name": "cooperatives",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "id",
+          "type": "uint256"
+        },
+        {
+          "internalType": "string",
+          "name": "nom",
+          "type": "string"
+        },
+        {
+          "internalType": "address",
+          "name": "walletAdresse",
+          "type": "address"
+        },
+        {
+          "internalType": "address",
+          "name": "tresorier",
+          "type": "address"
+        },
+        {
+          "internalType": "uint256",
+          "name": "dateCreation",
+          "type": "uint256"
+        },
+        {
+          "internalType": "bool",
+          "name": "active",
+          "type": "bool"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "string",
+          "name": "nom",
+          "type": "string"
+        }
+      ],
+      "name": "creerCooperative",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint256",
+          "name": "cooperativeId",
+          "type": "uint256"
+        },
+        {
+          "internalType": "address",
+          "name": "adresse",
+          "type": "address"
+        }
+      ],
+      "name": "estMembre",
+      "outputs": [
+        {
+          "internalType": "bool",
+          "name": "",
+          "type": "bool"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint256",
+          "name": "id",
+          "type": "uint256"
+        }
+      ],
+      "name": "getCooperative",
+      "outputs": [
+        {
+          "components": [
+            {
+              "internalType": "uint256",
+              "name": "id",
+              "type": "uint256"
+            },
+            {
+              "internalType": "string",
+              "name": "nom",
+              "type": "string"
+            },
+            {
+              "internalType": "address",
+              "name": "walletAdresse",
+              "type": "address"
+            },
+            {
+              "internalType": "address",
+              "name": "tresorier",
+              "type": "address"
+            },
+            {
+              "internalType": "uint256",
+              "name": "dateCreation",
+              "type": "uint256"
+            },
+            {
+              "internalType": "bool",
+              "name": "active",
+              "type": "bool"
+            }
+          ],
+          "internalType": "struct Cooperative.CooperativeInfo",
+          "name": "",
+          "type": "tuple"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint256",
+          "name": "",
+          "type": "uint256"
+        },
+        {
+          "internalType": "address",
+          "name": "",
+          "type": "address"
+        }
+      ],
+      "name": "membres",
+      "outputs": [
+        {
+          "internalType": "address",
+          "name": "walletAdresse",
+          "type": "address"
+        },
+        {
+          "internalType": "string",
+          "name": "nom",
+          "type": "string"
+        },
+        {
+          "internalType": "bool",
+          "name": "actif",
+          "type": "bool"
+        },
+        {
+          "internalType": "uint256",
+          "name": "dateCreation",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [],
+      "name": "nombreCooperatives",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "",
+          "type": "address"
+        }
+      ],
+      "name": "walletVersCooperative",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    }
+  ]
+}

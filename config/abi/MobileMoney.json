@@ -16,14 +16,14 @@
         },
         {
           "indexed": false,
-          "internalType": "address",
-          "name": "membre",
-          "type": "address"
+          "internalType": "string",
+          "name": "numeroTelephone",
+          "type": "string"
         },
         {
           "indexed": false,
-          "internalType": "enum CoopLedger.TypeOperation",
-          "name": "typeOp",
+          "internalType": "enum MobileMoney.Operateur",
+          "name": "operateur",
           "type": "uint8"
         },
         {
@@ -34,18 +34,18 @@
         },
         {
           "indexed": false,
-          "internalType": "string",
-          "name": "description",
-          "type": "string"
+          "internalType": "address",
+          "name": "walletDestination",
+          "type": "address"
         },
         {
           "indexed": false,
-          "internalType": "uint256",
-          "name": "timestamp",
-          "type": "uint256"
+          "internalType": "string",
+          "name": "refPaiement",
+          "type": "string"
         }
       ],
-      "name": "TransactionEnregistree",
+      "name": "PaiementRecu",
       "type": "event"
     },
     {
@@ -64,8 +64,13 @@
     {
       "inputs": [
         {
-          "internalType": "enum CoopLedger.TypeOperation",
-          "name": "typeOp",
+          "internalType": "string",
+          "name": "numeroTelephone",
+          "type": "string"
+        },
+        {
+          "internalType": "uint8",
+          "name": "operateur",
           "type": "uint8"
         },
         {
@@ -74,19 +79,17 @@
           "type": "uint256"
         },
         {
+          "internalType": "address",
+          "name": "walletDestination",
+          "type": "address"
+        },
+        {
           "internalType": "string",
-          "name": "description",
+          "name": "refPaiement",
           "type": "string"
         }
       ],
-      "name": "enregistrerTransaction",
-      "outputs": [],
-      "stateMutability": "nonpayable",
-      "type": "function"
-    },
-    {
-      "inputs": [],
-      "name": "getNombreTransactions",
+      "name": "enregistrerPaiement",
       "outputs": [
         {
           "internalType": "uint256",
@@ -94,12 +97,36 @@
           "type": "uint256"
         }
       ],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "string",
+          "name": "telephone",
+          "type": "string"
+        },
+        {
+          "internalType": "uint256",
+          "name": "montant",
+          "type": "uint256"
+        }
+      ],
+      "name": "genererRefPaiement",
+      "outputs": [
+        {
+          "internalType": "string",
+          "name": "",
+          "type": "string"
+        }
+      ],
       "stateMutability": "view",
       "type": "function"
     },
     {
       "inputs": [],
-      "name": "getSolde",
+      "name": "getNombrePaiements",
       "outputs": [
         {
           "internalType": "uint256",
@@ -118,7 +145,7 @@
           "type": "uint256"
         }
       ],
-      "name": "getTransaction",
+      "name": "getPaiement",
       "outputs": [
         {
           "components": [
@@ -128,13 +155,13 @@
               "type": "uint256"
             },
             {
-              "internalType": "address",
-              "name": "membre",
-              "type": "address"
+              "internalType": "string",
+              "name": "numeroTelephone",
+              "type": "string"
             },
             {
-              "internalType": "enum CoopLedger.TypeOperation",
-              "name": "typeOp",
+              "internalType": "enum MobileMoney.Operateur",
+              "name": "operateur",
               "type": "uint8"
             },
             {
@@ -143,32 +170,29 @@
               "type": "uint256"
             },
             {
-              "internalType": "string",
-              "name": "description",
-              "type": "string"
+              "internalType": "address",
+              "name": "walletDestination",
+              "type": "address"
             },
             {
               "internalType": "uint256",
               "name": "timestamp",
               "type": "uint256"
+            },
+            {
+              "internalType": "bool",
+              "name": "confirme",
+              "type": "bool"
+            },
+            {
+              "internalType": "string",
+              "name": "refPaiement",
+              "type": "string"
             }
           ],
-          "internalType": "struct CoopLedger.Transaction",
+          "internalType": "struct MobileMoney.PaiementMobile",
           "name": "",
           "type": "tuple"
-        }
-      ],
-      "stateMutability": "view",
-      "type": "function"
-    },
-    {
-      "inputs": [],
-      "name": "soldeTotal",
-      "outputs": [
-        {
-          "internalType": "uint256",
-          "name": "",
-          "type": "uint256"
         }
       ],
       "stateMutability": "view",
@@ -182,7 +206,7 @@
           "type": "uint256"
         }
       ],
-      "name": "transactions",
+      "name": "paiements",
       "outputs": [
         {
           "internalType": "uint256",
@@ -190,13 +214,13 @@
           "type": "uint256"
         },
         {
-          "internalType": "address",
-          "name": "membre",
-          "type": "address"
+          "internalType": "string",
+          "name": "numeroTelephone",
+          "type": "string"
         },
         {
-          "internalType": "enum CoopLedger.TypeOperation",
-          "name": "typeOp",
+          "internalType": "enum MobileMoney.Operateur",
+          "name": "operateur",
           "type": "uint8"
         },
         {
@@ -205,14 +229,24 @@
           "type": "uint256"
         },
         {
-          "internalType": "string",
-          "name": "description",
-          "type": "string"
+          "internalType": "address",
+          "name": "walletDestination",
+          "type": "address"
         },
         {
           "internalType": "uint256",
           "name": "timestamp",
           "type": "uint256"
+        },
+        {
+          "internalType": "bool",
+          "name": "confirme",
+          "type": "bool"
+        },
+        {
+          "internalType": "string",
+          "name": "refPaiement",
+          "type": "string"
         }
       ],
       "stateMutability": "view",

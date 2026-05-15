@@ -10,21 +10,9 @@
       "inputs": [
         {
           "indexed": false,
-          "internalType": "uint256",
-          "name": "id",
-          "type": "uint256"
-        },
-        {
-          "indexed": false,
           "internalType": "address",
-          "name": "membre",
+          "name": "destinataire",
           "type": "address"
-        },
-        {
-          "indexed": false,
-          "internalType": "enum CoopLedger.TypeOperation",
-          "name": "typeOp",
-          "type": "uint8"
         },
         {
           "indexed": false,
@@ -34,18 +22,43 @@
         },
         {
           "indexed": false,
-          "internalType": "string",
-          "name": "description",
-          "type": "string"
-        },
-        {
-          "indexed": false,
           "internalType": "uint256",
           "name": "timestamp",
           "type": "uint256"
         }
       ],
-      "name": "TransactionEnregistree",
+      "name": "DepotEffectue",
+      "type": "event"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "id",
+          "type": "uint256"
+        },
+        {
+          "indexed": false,
+          "internalType": "address",
+          "name": "expediteur",
+          "type": "address"
+        },
+        {
+          "indexed": false,
+          "internalType": "address",
+          "name": "destinataire",
+          "type": "address"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "montant",
+          "type": "uint256"
+        }
+      ],
+      "name": "TransfertEffectue",
       "type": "event"
     },
     {
@@ -64,29 +77,24 @@
     {
       "inputs": [
         {
-          "internalType": "enum CoopLedger.TypeOperation",
-          "name": "typeOp",
-          "type": "uint8"
+          "internalType": "address",
+          "name": "destinataire",
+          "type": "address"
         },
         {
           "internalType": "uint256",
           "name": "montant",
           "type": "uint256"
-        },
-        {
-          "internalType": "string",
-          "name": "description",
-          "type": "string"
         }
       ],
-      "name": "enregistrerTransaction",
+      "name": "deposer",
       "outputs": [],
       "stateMutability": "nonpayable",
       "type": "function"
     },
     {
       "inputs": [],
-      "name": "getNombreTransactions",
+      "name": "getNombreTransferts",
       "outputs": [
         {
           "internalType": "uint256",
@@ -98,7 +106,13 @@
       "type": "function"
     },
     {
-      "inputs": [],
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "adresse",
+          "type": "address"
+        }
+      ],
       "name": "getSolde",
       "outputs": [
         {
@@ -118,7 +132,7 @@
           "type": "uint256"
         }
       ],
-      "name": "getTransaction",
+      "name": "getTransfert",
       "outputs": [
         {
           "components": [
@@ -129,13 +143,13 @@
             },
             {
               "internalType": "address",
-              "name": "membre",
+              "name": "expediteur",
               "type": "address"
             },
             {
-              "internalType": "enum CoopLedger.TypeOperation",
-              "name": "typeOp",
-              "type": "uint8"
+              "internalType": "address",
+              "name": "destinataire",
+              "type": "address"
             },
             {
               "internalType": "uint256",
@@ -144,16 +158,21 @@
             },
             {
               "internalType": "string",
-              "name": "description",
+              "name": "motif",
               "type": "string"
             },
             {
               "internalType": "uint256",
               "name": "timestamp",
               "type": "uint256"
+            },
+            {
+              "internalType": "bool",
+              "name": "effectue",
+              "type": "bool"
             }
           ],
-          "internalType": "struct CoopLedger.Transaction",
+          "internalType": "struct Portefeuille.Transfert",
           "name": "",
           "type": "tuple"
         }
@@ -162,8 +181,14 @@
       "type": "function"
     },
     {
-      "inputs": [],
-      "name": "soldeTotal",
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "",
+          "type": "address"
+        }
+      ],
+      "name": "soldes",
       "outputs": [
         {
           "internalType": "uint256",
@@ -177,27 +202,14 @@
     {
       "inputs": [
         {
-          "internalType": "uint256",
-          "name": "",
-          "type": "uint256"
-        }
-      ],
-      "name": "transactions",
-      "outputs": [
-        {
-          "internalType": "uint256",
-          "name": "id",
-          "type": "uint256"
-        },
-        {
           "internalType": "address",
-          "name": "membre",
+          "name": "expediteur",
           "type": "address"
         },
         {
-          "internalType": "enum CoopLedger.TypeOperation",
-          "name": "typeOp",
-          "type": "uint8"
+          "internalType": "address",
+          "name": "destinataire",
+          "type": "address"
         },
         {
           "internalType": "uint256",
@@ -206,13 +218,59 @@
         },
         {
           "internalType": "string",
-          "name": "description",
+          "name": "motif",
+          "type": "string"
+        }
+      ],
+      "name": "transferer",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint256",
+          "name": "",
+          "type": "uint256"
+        }
+      ],
+      "name": "transferts",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "id",
+          "type": "uint256"
+        },
+        {
+          "internalType": "address",
+          "name": "expediteur",
+          "type": "address"
+        },
+        {
+          "internalType": "address",
+          "name": "destinataire",
+          "type": "address"
+        },
+        {
+          "internalType": "uint256",
+          "name": "montant",
+          "type": "uint256"
+        },
+        {
+          "internalType": "string",
+          "name": "motif",
           "type": "string"
         },
         {
           "internalType": "uint256",
           "name": "timestamp",
           "type": "uint256"
+        },
+        {
+          "internalType": "bool",
+          "name": "effectue",
+          "type": "bool"
         }
       ],
       "stateMutability": "view",
