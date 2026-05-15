@@ -903,7 +903,8 @@ router.get('/cooperatives/:id/stats', requireAuth, loadCoop, requireCoopMember, 
     });
     
     const currentBalance = totalIn - totalOut;
-    let growthRate = 0;
+    let growthRate = null;
+    const monthEarnings = currentBalance - prevBalance;
     
     if (prevBalance !== 0) {
       growthRate = ((currentBalance - prevBalance) / Math.abs(prevBalance)) * 100;
@@ -953,9 +954,10 @@ router.get('/cooperatives/:id/stats', requireAuth, loadCoop, requireCoopMember, 
     const userBalance = userContributions.reduce((s, t) => s + t.amount, 0);
 
     res.json({
-      balance: totalIn - totalOut,
+      balance: currentBalance,
       userBalance, // Solde personnel du membre dans la coop
-      growthRate: growthRate.toFixed(1),
+      growthRate: growthRate !== null ? growthRate.toFixed(1) : null,
+      monthEarnings,
       totalTransactions: transactions.length,
       activeVotes: votes.length,
       membersCount: coop.members.length,
