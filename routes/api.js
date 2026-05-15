@@ -2041,23 +2041,55 @@ router.get('/cooperatives/:id/blockchain/export', requireAuth, loadCoop, async (
 // Route de synchronisation pour sceller les anciennes transactions (Admin)
 router.post('/cooperatives/:id/blockchain/sync', loadCoop, requirePresidentOrAdmin, async (req, res) => {
   try {
+    // On trie de manière déterministe
     const transactions = await Transaction.find({ cooperativeId: req.params.id }).sort({ date: 1, _id: 1 });
+    
     let lastHash = '0';
     let syncedCount = 0;
+    let repairCount = 0;
 
     for (let tx of transactions) {
-      if (!tx.txHash) {
+      const isRealHash = typeof tx.txHash === 'string' && tx.txHash.startsWith('0x');
+      let changed = false;
+
+      // 1. Correction du chainage
+      if (tx.previousHash !== lastHash) {
         tx.previousHash = lastHash;
-        // Déclenche le pre-save hook pour générer le hash
-        await tx.save();
-        syncedCount++;
+        changed = true;
       }
-      lastHash = tx.txHash;
+
+      // 2. Correction du hash (uniquement pour les hashs locaux)
+      if (!isRealHash) {
+        const expectedHash = tx.calculateHash ? tx.calculateHash() : null;
+        if (expectedHash && tx.txHash !== expectedHash) {
+          tx.txHash = expectedHash;
+          changed = true;
+        }
+      }
+
+      if (changed) {
+        // On utilise .updateOne pour éviter de déclencher les hooks qui pourraient interférer
+        await Transaction.updateOne(
+          { _id: tx._id },
+          { $set: { previousHash: tx.previousHash, txHash: tx.txHash } }
+        );
+        repairCount++;
+      }
+      
+      // On met à jour le lastHash pour le suivant, peu importe si on a changé celui-là
+      lastHash = tx.txHash || '0';
+      syncedCount++;
     }
 
-    res.json({ message: "Synchronisation terminée", syncedCount });
+    res.json({ 
+      success: true,
+      message: "Synchronisation et réparation terminées", 
+      totalProcessed: syncedCount,
+      totalRepaired: repairCount 
+    });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error('[blockchain-sync] Error:', err);
+    res.status(500).json({ error: "Échec de la synchronisation : " + err.message });
   }
 });
 
