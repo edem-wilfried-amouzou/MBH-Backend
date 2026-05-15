@@ -38,7 +38,7 @@ const createTransaction = async ({
       description,
       amount: Number(amount),
       currency: { iso: 'XOF' },
-      callback_url: callbackUrl || process.env.FEDAPAY_RETURN_URL || 'http://localhost:5173/dashboard?payment=success',
+      callback_url: callbackUrl || process.env.FEDAPAY_RETURN_URL || `${process.env.APP_PUBLIC_WEB_URL || 'http://localhost:5173'}/dashboard?payment=success`,
       custom_metadata: metadata,
       customer,
     });
