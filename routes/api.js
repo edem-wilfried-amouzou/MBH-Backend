@@ -11,6 +11,23 @@ const Vote = require('../models/Vote');
 const Program = require('../models/Program');
 const { ForumThread, ForumPost } = require('../models/Forum');
 const blockchainSvc = require('../blockchain');
+
+// Health & Config Debug (Safe summary)
+router.get('/health', (req, res) => {
+  res.json({
+    status: 'ok',
+    environment: process.env.NODE_ENV || 'production',
+    blockchain: {
+      available: blockchainSvc.isAvailable(),
+      canWrite: blockchainSvc.canWrite(),
+      rpcSet: !!process.env.BLOCKCHAIN_RPC_URL,
+      pkSet: !!process.env.BLOCKCHAIN_PRIVATE_KEY,
+      network: process.env.BLOCKCHAIN_NETWORK_LABEL || 'Non défini'
+    },
+    mongodb: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected'
+  });
+});
+
 const { anchorCompletedTransaction } = require('../services/blockchainAnchor');
 // CinetPay non utilisé — FedaPay uniquement
 const { createTransaction: fedapayCreate, verifyTransaction: fedapayVerify, directPay: fedapayDirect } = require('../services/fedapay');
@@ -1975,6 +1992,51 @@ router.get('/cooperatives/:id/blockchain/verify', loadCoop, async (req, res) => 
     res.status(500).json({ error: "Échec de l'audit : " + err.message });
   }
 });
+
+router.get('/cooperatives/:id/blockchain/export', requireAuth, loadCoop, async (req, res) => {
+  try {
+    const transactions = await Transaction.find({ cooperativeId: req.params.id }).sort({ date: 1 });
+    
+    // Header CSV
+    let csv = 'ID,Titre,Date,Montant,Type,Hash Blockchain,Status,Integrite\n';
+    
+    let previousHash = '0';
+    for (let tx of transactions) {
+      const isRealHash = typeof tx.txHash === 'string' && tx.txHash.startsWith('0x');
+      let integrity = 'OK';
+      
+      // Validation croisée (identique à la route /verify)
+      if (tx.previousHash !== previousHash) {
+        integrity = 'ERREUR: Chaine rompue';
+      } else if (!isRealHash) {
+        const calculated = tx.calculateHash ? tx.calculateHash() : null;
+        if (calculated && tx.txHash !== calculated) {
+          integrity = 'ERREUR: Donnee alteree';
+        }
+      }
+      
+      const row = [
+        tx._id,
+        `"${(tx.title || 'Sans titre').replace(/"/g, '""')}"`,
+        tx.date ? new Date(tx.date).toISOString() : '—',
+        tx.amount || 0,
+        tx.type || '—',
+        tx.txHash || '—',
+        tx.status || '—',
+        integrity
+      ];
+      csv += row.join(',') + '\n';
+      previousHash = tx.txHash || previousHash; // On continue la chaine même si vide pour l'export
+    }
+    
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', `attachment; filename=audit_agrilogix_${req.params.id}.csv`);
+    res.status(200).send(csv);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 
 // Route de synchronisation pour sceller les anciennes transactions (Admin)
 router.post('/cooperatives/:id/blockchain/sync', loadCoop, requirePresidentOrAdmin, async (req, res) => {

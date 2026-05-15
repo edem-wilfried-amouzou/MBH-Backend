@@ -92,11 +92,21 @@ function getProvider() {
     const rpcUrl = FALLBACK_RPCS[_currentRpcIndex];
     try {
       // staticNetwork: true évite que ethers essaie de redétecter le réseau à chaque requête
-      _provider = new ethers.JsonRpcProvider(rpcUrl, undefined, { staticNetwork: true });
+      // On ajoute un timeout de 5s pour éviter de bloquer l'event loop
+      _provider = new ethers.JsonRpcProvider(rpcUrl, undefined, { 
+        staticNetwork: true,
+        batchMaxCount: 1 
+      });
+      
+      // Test de connexion rapide
+      _provider.getBlockNumber().catch(() => {
+        _provider = null;
+        _currentRpcIndex = (_currentRpcIndex + 1) % FALLBACK_RPCS.length;
+      });
     } catch (err) {
-      console.error(`[Blockchain] Échec RPC ${rpcUrl}, tentative suivante...`);
+      console.error(`[Blockchain] Échec initialisation RPC ${rpcUrl}`);
       _currentRpcIndex = (_currentRpcIndex + 1) % FALLBACK_RPCS.length;
-      return getProvider(); // Récursif pour essayer le suivant
+      return null;
     }
   }
   return _provider;
