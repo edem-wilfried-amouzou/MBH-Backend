@@ -306,14 +306,14 @@ router.get('/users/:id', async (req, res) => {
 
 router.put('/users/:id', requireAuth, async (req, res) => {
   try {
-    const { name, phone, address } = req.body;
+    const { name, phone, address, email, profession, bio } = req.body;
     const targetId = req.params.id;
     const requesterId = req.user._id.toString();
     // Only allow users to update their own profile
     if (requesterId !== targetId) {
       return res.status(403).json({ error: 'Accès refusé: modification du profil non autorisée' });
     }
-    const user = await User.findByIdAndUpdate(targetId, { name, phone, address }, { new: true });
+    const user = await User.findByIdAndUpdate(targetId, { name, phone, address, email, profession, bio }, { new: true });
     res.json(user);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });

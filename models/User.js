@@ -7,6 +7,8 @@ const UserSchema = new mongoose.Schema({
   role: { type: String, default: 'Membre' },
   email: { type: String, trim: true, lowercase: true },
   password: { type: String, required: true },
+  profession: { type: String, default: '' },
+  bio: { type: String, default: '' },
   emailVerified: { type: Boolean, default: false },
   emailVerifyTokenHash: { type: String },
   emailVerifyExpiresAt: { type: Date },
