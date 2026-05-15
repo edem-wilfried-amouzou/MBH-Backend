@@ -2150,11 +2150,17 @@ router.post('/cooperatives/:id/blockchain/sync', requireAuth, loadCoop, requireP
         }
       }
 
+      // 3. Correction du statut
+      if (tx.status !== 'completed' && (tx.txHash || isRealHash)) {
+        tx.status = 'completed';
+        changed = true;
+      }
+
       if (changed) {
         // On utilise .updateOne pour éviter de déclencher les hooks qui pourraient interférer
         await Transaction.updateOne(
           { _id: tx._id },
-          { $set: { previousHash: tx.previousHash, txHash: tx.txHash } }
+          { $set: { previousHash: tx.previousHash, txHash: tx.txHash, status: tx.status } }
         );
         repairCount++;
       }
