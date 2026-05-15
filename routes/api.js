@@ -1232,15 +1232,12 @@ router.post('/cooperatives/:id/transactions', requireAuth, loadCoop, requireCoop
     if (!amount || Number(amount) <= 0) return res.status(400).json({ error: 'Montant invalide' });
     const numericAmount = Number(amount);
 
-    // Validation du moyen de paiement Mobile Money
-    const MOBILE_METHODS = ['MTN', 'Moov', 'Flooz', 'T-Money'];
-    const BANKING_METHODS = ['Virement', 'Espèces', 'Chèque', 'Autre'];
     if (accountType === 'mobile') {
       if (!accountNumber || !/^\d{7,15}$/.test(accountNumber.replace(/[\s-]/g, ''))) {
         return res.status(400).json({ error: 'Numéro de téléphone Mobile Money invalide (7 à 15 chiffres)' });
       }
-      if (!paymentMethod || !MOBILE_METHODS.includes(paymentMethod)) {
-        return res.status(400).json({ error: `Opérateur Mobile Money invalide. Valeurs: ${MOBILE_METHODS.join(', ')}` });
+      if (!paymentMethod || paymentMethod.trim().length === 0) {
+        return res.status(400).json({ error: 'Opérateur Mobile Money manquant.' });
       }
     }
     if (accountType === 'bancaire') {
