@@ -11,11 +11,15 @@ function isProbablyOnChainHash(hex) {
 function mongoToTypeOp(type, category = '', title = '') {
   const c = String(category || '').toLowerCase();
   const t = String(title || '').toLowerCase();
-  if (type === 'in') {
+  const typeLower = String(type || '').toLowerCase();
+
+  // Entrées
+  if (typeLower === 'in' || typeLower === 'cotisation' || typeLower === 'deposit' || typeLower === 'credit' || c === 'cotisation') {
     if (/prime|subvention|don\b/.test(c) || /\bprime\b|subvention/.test(t)) return 2;
     return 0;
   }
-  if (type === 'out') {
+  // Sorties
+  if (typeLower === 'out') {
     if (/remboursement/.test(c) || /remboursement/.test(t)) return 3;
     return 1;
   }
@@ -38,6 +42,10 @@ async function anchorCompletedTransaction(txDoc) {
 
   try {
     const hash = await blockchain.recordLedgerTransaction(typeOp, montant, desc);
+    if (hash && txDoc.save) {
+      txDoc.txHash = hash;
+      await txDoc.save();
+    }
     return hash;
   } catch (e) {
     console.error('[blockchainAnchor]', e?.shortMessage || e?.message || e);

@@ -1095,13 +1095,13 @@ router.post('/cooperatives/:id/transactions', requireAuth, loadCoop, requireCoop
     if (!amount || Number(amount) <= 0) return res.status(400).json({ error: 'Montant invalide' });
     const numericAmount = Number(amount);
 
-    const allTx = await Transaction.find({ cooperativeId: coopId });
-    const confirmedIn = allTx.filter(t => t.type === 'in' && t.status === 'completed').reduce((s,t)=>s+t.amount,0);
-    const confirmedOut = allTx.filter(t => t.type === 'out' && t.status === 'completed').reduce((s,t)=>s+t.amount,0);
+    const allTx = await Transaction.find({ cooperativeId: coopId, status: 'completed' });
+    const confirmedIn = allTx.filter(t => ['in', 'cotisation', 'deposit', 'credit'].includes(t.type) || t.category === 'Cotisation').reduce((s,t)=>s+t.amount,0);
+    const confirmedOut = allTx.filter(t => t.type === 'out').reduce((s,t)=>s+t.amount,0);
     const currentBalance = confirmedIn - confirmedOut;
 
     if (type === 'out' && numericAmount > currentBalance) {
-      return res.status(400).json({ error: 'Solde insuffisant pour cette opération' });
+      return res.status(400).json({ error: `Solde insuffisant pour cette opération (Solde actuel: ${currentBalance} FCFA)` });
     }
 
     const isPresOrAdmin = req.user?.role === 'Admin' || isPresident(req.user);
@@ -1227,12 +1227,12 @@ router.post('/cooperatives/:id/transactions/:txId/validate', requireAuth, loadCo
 
     // Validate balance if outgoing
     if (tx.type === 'out') {
-      const allTx = await Transaction.find({ cooperativeId: req.params.id });
-      const confirmedIn = allTx.filter(t => t.type === 'in' && t.status === 'completed').reduce((s,t)=>s+t.amount,0);
-      const confirmedOut = allTx.filter(t => t.type === 'out' && t.status === 'completed').reduce((s,t)=>s+t.amount,0);
+      const allTx = await Transaction.find({ cooperativeId: req.params.id, status: 'completed' });
+      const confirmedIn = allTx.filter(t => ['in', 'cotisation', 'deposit', 'credit'].includes(t.type)).reduce((s,t)=>s+t.amount,0);
+      const confirmedOut = allTx.filter(t => t.type === 'out').reduce((s,t)=>s+t.amount,0);
       const currentBalance = confirmedIn - confirmedOut;
       if (tx.amount > currentBalance) {
-        return res.status(400).json({ error: 'Solde insuffisant pour valider cette opération' });
+        return res.status(400).json({ error: `Solde insuffisant pour valider cette opération (Solde actuel: ${currentBalance} FCFA)` });
       }
     }
 
