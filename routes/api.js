@@ -320,7 +320,7 @@ router.get('/me/coops', requireAuth, async (req, res) => {
 // USERS - Registration with automatic credentials
 router.post('/users', async (req, res) => {
   try {
-    const { email, password, name } = req.body;
+    const { email, password, name, phone } = req.body;
     if (!name?.trim()) {
       return res.status(400).json({ error: 'Nom complet requis' });
     }
