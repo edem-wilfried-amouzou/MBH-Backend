@@ -274,10 +274,43 @@ router.get('/cooperatives/:id', requireAuth, loadCoop, async (req, res) => {
 
 router.get('/cooperatives/:id/notifications', requireAuth, loadCoop, requireCoopMember, async (req, res) => {
   try {
+    const userId = req.user._id;
     const notifs = await Notification.find({ cooperativeId: req.params.id })
       .sort({ createdAt: -1 })
-      .limit(20);
-    res.json(notifs);
+      .limit(30);
+    // Inject a per-user 'read' boolean
+    const withRead = notifs.map(n => ({
+      ...n.toObject(),
+      read: n.readBy?.some(id => id.toString() === userId.toString()) ?? false,
+    }));
+    res.json(withRead);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * POST /api/notifications/:notifId/read
+ * Marque une notification comme lue pour l'utilisateur courant
+ */
+router.post('/notifications/:notifId/read', requireAuth, async (req, res) => {
+  try {
+    const notif = await Notification.findByIdAndUpdate(
+      req.params.notifId,
+      { $addToSet: { readBy: req.user._id } },
+      { new: true }
+    );
+    if (!notif) return res.status(404).json({ error: 'Notification introuvable' });
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.get('/cooperatives/:id/forum/stats', requireAuth, loadCoop, requireCoopMember, async (req, res) => {
+  try {
+    // Return a dummy unreadCount until read receipts are fully implemented
+    res.json({ unreadCount: 0 });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -1181,7 +1214,7 @@ router.get('/cooperatives/:id/monthly-transactions', requireAuth, loadCoop, requ
 // ═══════════════════════════════════════════════════════════
 // COMPTABILITÉ — Journal + Bilan + Catégories + Mensuel
 // ═══════════════════════════════════════════════════════════
-router.get('/cooperatives/:id/comptabilite', requireAuth, loadCoop, requireCoopMember, requireAccountingAccess, async (req, res) => {
+router.get('/cooperatives/:id/comptabilite', requireAuth, loadCoop, requireCoopMember, async (req, res) => {
   try {
     const coopId = req.params.id;
     const now = new Date();
