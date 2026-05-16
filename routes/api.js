@@ -363,7 +363,10 @@ router.get('/me/coops', requireAuth, async (req, res) => {
 // USERS - Registration with automatic credentials
 router.post('/users', async (req, res) => {
   try {
-    const { email, password, name, phone } = req.body;
+    const { email, password, name, phone, acceptedTerms } = req.body;
+    if (!acceptedTerms) {
+      return res.status(400).json({ error: 'Vous devez accepter les conditions générales d\'utilisation et la politique de confidentialité.' });
+    }
     if (!name?.trim()) {
       return res.status(400).json({ error: 'Nom complet requis' });
     }
@@ -396,6 +399,8 @@ router.post('/users', async (req, res) => {
       name: name.trim(),
       password: hashedPassword,
       emailVerified: true,
+      acceptedTerms: true,
+      acceptedTermsAt: new Date(),
     };
     if (email?.trim()) {
       doc.email = email.trim().toLowerCase();

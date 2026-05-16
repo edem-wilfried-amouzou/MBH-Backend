@@ -14,6 +14,8 @@ const UserSchema = new mongoose.Schema({
   hasSeenGuide: { type: Boolean, default: false },
   isSystemAdmin: { type: Boolean, default: false },
   pushToken: { type: String, default: null },
+  acceptedTerms: { type: Boolean, default: false },
+  acceptedTermsAt: { type: Date },
   createdAt: { type: Date, default: Date.now }
 });
 
