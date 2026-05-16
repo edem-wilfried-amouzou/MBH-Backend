@@ -1284,6 +1284,32 @@ router.get('/cooperatives/:id/comptabilite', requireAuth, loadCoop, requireCoopM
       };
     });
 
+    // ── ÉVOLUTION MENSUELLE ──────────────────────────────────────────
+    const monthLabels = ['Jan', 'Fev', 'Mar', 'Avr', 'Mai', 'Juin', 'Juil', 'Aou', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const mensuel = [];
+    for (let i = 11; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      mensuel.push({
+        year: d.getFullYear(),
+        month: d.getMonth(),
+        mois: monthLabels[d.getMonth()],
+        entrees: 0,
+        sorties: 0,
+        solde: 0
+      });
+    }
+
+    allTx.forEach(tx => {
+      const d = new Date(tx.date);
+      const bucket = mensuel.find(b => b.year === d.getFullYear() && b.month === d.getMonth());
+      if (bucket) {
+        const isEntry = tx.type === 'in' || tx.type === 'credit' || tx.type === 'deposit' || tx.type === 'cotisation';
+        if (isEntry) bucket.entrees += tx.amount;
+        else bucket.sorties += tx.amount;
+      }
+    });
+    mensuel.forEach(b => { b.solde = b.entrees - b.sorties; });
+
     res.json({
       bilan: { totalEntrees, totalSorties, solde, tauxEpargne: Number(tauxEpargne), nbTransactions: allTx.length },
       moisCourant: { entrees: entreeMois, sorties: sortieMois, solde: entreeMois - sortieMois, nb: txMois.length },
@@ -1291,6 +1317,7 @@ router.get('/cooperatives/:id/comptabilite', requireAuth, loadCoop, requireCoopM
         nom, entrees: d.entrees, sorties: d.sorties, solde: d.entrees - d.sorties, nb: d.nb,
         color: ['#7c3aed','#10b981','#ef4444','#f59e0b','#64748b'][i % 5]
       })),
+      mensuel: mensuel.map(({ year, month, ...rest }) => rest),
       journal
     });
   } catch (err) {
