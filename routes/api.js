@@ -261,7 +261,9 @@ router.get('/cooperatives/:id', requireAuth, loadCoop, async (req, res) => {
       });
     }
     
-    if (!canManageCoopMembers(req.user, coop)) delete o.inviteToken;
+    o.myRole = getLocalRole(coop, req.user._id.toString()) || 'Membre';
+    o.canManage = canManageCoopMembers(req.user, coop);
+    if (!o.canManage) delete o.inviteToken;
     res.json(o);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -368,6 +370,18 @@ router.post('/users/guide-seen', requireAuth, async (req, res) => {
     user.hasSeenGuide = true;
     await user.save();
     res.json({ success: true, hasSeenGuide: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post('/users/push-token', requireAuth, async (req, res) => {
+  try {
+    const { token } = req.body;
+    if (!token) return res.status(400).json({ error: 'Token manquant' });
+    
+    await User.findByIdAndUpdate(req.user._id, { pushToken: token });
+    res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -513,13 +527,21 @@ router.delete('/cooperatives/:id', requireAuth, async (req, res) => {
 router.put('/cooperatives/:id/members/:userId/role', requireAuth, loadCoop, requirePresidentOrAdmin, async (req, res) => {
   try {
     const { role } = req.body;
-    // Update the User model directly as role is stored there
-    const updatedUser = await User.findByIdAndUpdate(req.params.userId, { role }, { new: true });
-    if (updatedUser) {
-      res.json(updatedUser);
-    } else {
-      res.status(404).json({ error: 'Utilisateur non trouvé' });
-    }
+    const { id, userId } = req.params;
+
+    const coop = await Cooperative.findById(id);
+    if (!coop) return res.status(404).json({ error: 'Coopérative non trouvée' });
+
+    if (!coop.memberRoles) coop.memberRoles = new Map();
+    
+    // On stocke le rôle spécifique dans la coopérative
+    coop.memberRoles.set(userId, role);
+    
+    // On marque la map comme modifiée pour Mongoose
+    coop.markModified('memberRoles');
+    await coop.save();
+
+    res.json({ success: true, userId, role });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -1285,7 +1307,7 @@ router.post('/cooperatives/:id/transactions', requireAuth, loadCoop, requireCoop
     const isAuthorizedRole = allowedRoles.includes(localRole.toLowerCase());
     
     const isOwner = req.coop.adminId.toString() === req.user._id.toString();
-    const isGlobalAdmin = req.user.role === 'Admin';
+    const isGlobalAdmin = req.user.isSystemAdmin;
     
     if (!isAuthorizedRole && !isOwner && !isGlobalAdmin) {
       return res.status(403).json({ error: 'Accès refusé : Seul le trésorier ou l\'administrateur peut enregistrer des transactions' });

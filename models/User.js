@@ -4,7 +4,6 @@ const UserSchema = new mongoose.Schema({
   name: { type: String, required: true, trim: true },
   phone: { type: String, trim: true },
   address: { type: String, default: '' },
-  role: { type: String, default: 'Membre' },
   email: { type: String, trim: true, lowercase: true },
   password: { type: String, required: true },
   profession: { type: String, default: '' },
@@ -13,6 +12,8 @@ const UserSchema = new mongoose.Schema({
   emailVerifyTokenHash: { type: String },
   emailVerifyExpiresAt: { type: Date },
   hasSeenGuide: { type: Boolean, default: false },
+  isSystemAdmin: { type: Boolean, default: false },
+  pushToken: { type: String, default: null },
   createdAt: { type: Date, default: Date.now }
 });
 
