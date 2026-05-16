@@ -381,7 +381,7 @@ router.post('/users/push-token', requireAuth, async (req, res) => {
   }
 });
 
-router.post('/users/guide-seen', requireAuth, async (req, res) => {
+router.post('/users/mark-guide-seen', requireAuth, async (req, res) => {
   try {
     const user = await User.findById(req.user._id);
     if (!user) return res.status(404).json({ error: 'User not found' });
