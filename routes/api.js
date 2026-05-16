@@ -1279,14 +1279,16 @@ router.get('/cooperatives/:id/transactions', requireAuth, loadCoop, requireCoopM
 
 router.post('/cooperatives/:id/transactions', requireAuth, loadCoop, requireCoopMember, async (req, res) => {
   try {
-    const localRole = getLocalRole(req.coop, req.user._id.toString());
-    // Autoriser Trésorier, Admin (local ou global) et Propriétaire
-    const isTreasurer = ['Trésorier', 'Tresorier', 'Admin'].includes(localRole);
+    const localRole = (getLocalRole(req.coop, req.user._id.toString()) || '').trim();
+    // Autoriser Trésorier, Admin (local ou global) et Propriétaire - Sensible aux variations de saisie
+    const allowedRoles = ['trésorier', 'tresorier', 'admin', 'président', 'president'];
+    const isAuthorizedRole = allowedRoles.includes(localRole.toLowerCase());
+    
     const isOwner = req.coop.adminId.toString() === req.user._id.toString();
     const isGlobalAdmin = req.user.role === 'Admin';
     
-    if (!isTreasurer && !isOwner && !isGlobalAdmin) {
-      return res.status(403).json({ error: 'Accès refusé : Seul le trésorier peut enregistrer des transactions' });
+    if (!isAuthorizedRole && !isOwner && !isGlobalAdmin) {
+      return res.status(403).json({ error: 'Accès refusé : Seul le trésorier ou l\'administrateur peut enregistrer des transactions' });
     }
 
     const { title, amount, type, category, accountType, paymentMethod, accountNumber } = req.body;
@@ -1342,12 +1344,17 @@ router.post('/cooperatives/:id/transactions', requireAuth, loadCoop, requireCoop
     await newTx.save();
 
     // NOTIFICATION
-    const isCotisation = type === 'in' || category === 'Cotisation';
+    const isCotisation = category === 'Cotisation' || category === 'Cotisations';
     const notifType = isCotisation ? 'cotisation' : 'transaction';
-    const notifTitle = isCotisation ? 'Nouvelle Cotisation' : 'Nouvelle Transaction';
+    
+    let notifTitle = 'Nouvelle Transaction';
+    if (isCotisation) notifTitle = 'Nouvelle Cotisation';
+    else if (type === 'in') notifTitle = 'Nouvelle Entrée';
+    else if (type === 'out') notifTitle = 'Nouvelle Dépense';
+
     const notifMsg = isCotisation 
       ? `${req.user?.name || 'Un membre'} a effectué une cotisation de ${numericAmount.toLocaleString()} FCFA.`
-      : `${req.user?.name || 'Un membre'} a enregistré une transaction : ${title} (${numericAmount.toLocaleString()} FCFA).`;
+      : `${req.user?.name || 'Un membre'} a enregistré une opération (${notifTitle.toLowerCase()}) : ${title} (${numericAmount.toLocaleString()} FCFA).`;
 
     createAndEmitNotification(req.io, {
       coopId,
