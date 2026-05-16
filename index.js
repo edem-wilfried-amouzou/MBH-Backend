@@ -108,7 +108,9 @@ mongoose
   })
   .catch((err) => console.log('MongoDB connection error:', err));
 
+const adminRoutes = require('./routes/admin');
 app.use('/api', apiRoutes);
+app.use('/api/admin', adminRoutes.router);
 app.use('/', apiRoutes); // Mount at root to support /login and /api/login
 
 // Socket.IO authentication middleware (Supports JWT & Fallback)

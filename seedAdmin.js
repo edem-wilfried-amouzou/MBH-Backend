@@ -1,38 +1,31 @@
 require('dotenv').config();
 const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
-const User = require('./models/User');
+const Admin = require('./models/Admin');
 
 const MONGO_URI = process.env.MONGO_URI || 'mongodb://localhost:27017/agrilogix';
 
 async function seedAdmin() {
   try {
     await mongoose.connect(MONGO_URI);
-    console.log('Connecté à la base de données pour le seeding...');
+    console.log('Connecté à la base de données pour le seeding (Admin Model)...');
 
     const adminEmail = 'admin@agrilogix.com';
-    const existingAdmin = await User.findOne({ email: adminEmail });
+    const existingAdmin = await Admin.findOne({ email: adminEmail });
 
     if (existingAdmin) {
-      console.log('L\'administrateur existe déjà.');
-      // Ensure he is system admin
-      existingAdmin.isSystemAdmin = true;
-      await existingAdmin.save();
-      console.log('Privilèges admin confirmés.');
+      console.log('L\'administrateur existe déjà dans la collection Admin.');
     } else {
       const hashedPassword = await bcrypt.hash('Admin@2026!', 10);
-      const newAdmin = new User({
+      const newAdmin = new Admin({
         name: 'System Admin',
         email: adminEmail,
         password: hashedPassword,
-        isSystemAdmin: true,
-        emailVerified: true,
-        acceptedTerms: true,
-        acceptedTermsAt: new Date()
+        role: 'SuperAdmin'
       });
 
       await newAdmin.save();
-      console.log('Nouvel administrateur créé avec succès !');
+      console.log('Nouvel administrateur créé avec succès dans la collection Admin !');
       console.log('Email: admin@agrilogix.com');
       console.log('Password: Admin@2026!');
     }
