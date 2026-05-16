@@ -284,7 +284,7 @@ router.get('/me/coops', requireAuth, async (req, res) => {
     const userId = req.user._id.toString();
     const memberCoops = await Cooperative.find({
       $or: [
-        { members: userId },
+        { "members.user": userId },
         { adminId: userId }
       ]
     });
@@ -293,8 +293,8 @@ router.get('/me/coops', requireAuth, async (req, res) => {
     // Inject roles for memberCoops
     const coopsWithRoles = memberCoops.map(c => {
       const o = c.toObject();
-      const localRole = c.memberRoles ? c.memberRoles.get(userId) : null;
-      o.myRole = localRole || req.user.role || 'Membre';
+      const m = c.members.find(m => (m.user?._id || m.user || '').toString() === userId);
+      o.myRole = m ? m.role : 'Membre';
       return o;
     });
     
@@ -498,7 +498,7 @@ router.post('/cooperatives', requireAuth, async (req, res) => {
 });
 
 router.get('/cooperatives', async (req, res) => {
-  const coops = await Cooperative.find().populate('members');
+  const coops = await Cooperative.find().populate('members.user');
   res.json(coops);
 });
 
@@ -552,7 +552,7 @@ router.delete('/cooperatives/:id/members/:userId', requireAuth, loadCoop, requir
     if (targetId === requesterId) {
       return res.status(400).json({ error: 'Action interdite: impossible de supprimer votre propre compte de la coopérative' });
     }
-    coop.members = coop.members.filter(m => m._id.toString() !== targetId);
+    coop.members = coop.members.filter(m => (m.user?._id || m.user || '').toString() !== targetId);
     await coop.save();
     // Also remove them from votedMembers in all active votes for this coop
     await Vote.updateMany(
