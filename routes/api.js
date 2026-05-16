@@ -371,6 +371,17 @@ router.post('/users', async (req, res) => {
   }
 });
 
+router.post('/users/guide-seen', requireAuth, async (req, res) => {
+  try {
+    const user = await User.findById(req.user._id);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    user.hasSeenGuide = true;
+    await user.save();
+    res.json({ success: true, hasSeenGuide: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 // LOGIN
 router.get('/users/:id', async (req, res) => {
   try {

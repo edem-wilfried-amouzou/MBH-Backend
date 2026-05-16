@@ -12,6 +12,7 @@ const UserSchema = new mongoose.Schema({
   emailVerified: { type: Boolean, default: false },
   emailVerifyTokenHash: { type: String },
   emailVerifyExpiresAt: { type: Date },
+  hasSeenGuide: { type: Boolean, default: false },
   createdAt: { type: Date, default: Date.now }
 });
 
