@@ -169,12 +169,27 @@ async function loadCoop(req, res, next) {
   }
 }
 
+function getLocalRole(coop, userId) {
+  if (!coop || !userId) return null;
+  if (coop.adminId?.toString() === userId) return 'Admin';
+  if (coop.memberRoles && coop.memberRoles.get) {
+    const role = coop.memberRoles.get(userId);
+    if (role) return role;
+  }
+  return null;
+}
+
 function requireCoopMember(req, res, next) {
   const userId = req.user?._id?.toString();
   const coop = req.coop;
   const isMember = coop.members?.some((m) => m.toString() === userId);
-  const isCoopAdminRole = isMember && (req.user?.role === 'Admin' || isPresident(req.user));
-  const isAdmin = coop.adminId?.toString() === userId || isCoopAdminRole;
+  
+  const localRole = getLocalRole(coop, userId);
+  const isCoopAdminRole = localRole === 'Admin' || localRole === 'Président' || localRole === 'President';
+  // Fallback to global role for retro-compatibility
+  const isGlobalAdmin = isMember && (req.user?.role === 'Admin' || isPresident(req.user));
+  
+  const isAdmin = coop.adminId?.toString() === userId || isCoopAdminRole || isGlobalAdmin;
   if (isAdmin || isMember) return next();
   return res.status(403).json({ error: 'Accès refusé: adhésion requise' });
 }
@@ -183,8 +198,12 @@ function requirePresidentOrAdmin(req, res, next) {
   const userId = req.user?._id?.toString();
   const coop = req.coop;
   const isMember = coop.members?.some((m) => m.toString() === userId);
-  const isCoopAdminRole = isMember && (req.user?.role === 'Admin' || isPresident(req.user));
-  const isAdmin = coop.adminId?.toString() === userId || isCoopAdminRole;
+  
+  const localRole = getLocalRole(coop, userId);
+  const isCoopAdminRole = localRole === 'Admin' || localRole === 'Président' || localRole === 'President';
+  const isGlobalAdmin = isMember && (req.user?.role === 'Admin' || isPresident(req.user));
+  
+  const isAdmin = coop.adminId?.toString() === userId || isCoopAdminRole || isGlobalAdmin;
   if (isAdmin) return next();
   return res.status(403).json({ error: 'Accès refusé: propriétaire/admin de la coop requis' });
 }
@@ -284,6 +303,10 @@ function canManageCoopMembers(user, coop) {
   if (coop.adminId?.toString() === userId) return true;
   const isMember = coop.members?.some((m) => (m._id ?? m).toString() === userId);
   if (!isMember) return false;
+  
+  const localRole = getLocalRole(coop, userId);
+  if (localRole === 'Admin' || localRole === 'Président' || localRole === 'President') return true;
+  
   return user.role === 'Admin' || isPresident(user);
 }
 
@@ -295,6 +318,15 @@ router.get('/cooperatives/:id', requireAuth, loadCoop, async (req, res) => {
       .populate('adminId');
     if (!coop) return res.status(404).json({ error: 'Coop not found' });
     const o = coop.toObject();
+    
+    // Inject local roles
+    if (o.members && coop.memberRoles) {
+      o.members = o.members.map(m => {
+        const role = coop.memberRoles.get(m._id.toString());
+        return { ...m, role: role || m.role || 'Membre' };
+      });
+    }
+    
     if (!canManageCoopMembers(req.user, coop)) delete o.inviteToken;
     res.json(o);
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -310,7 +342,16 @@ router.get('/me/coops', requireAuth, async (req, res) => {
       ]
     });
     const pendingCoops = await Cooperative.find({ pendingMembers: userId });
-    res.json({ memberCoops, pendingCoops });
+    
+    // Inject roles for memberCoops
+    const coopsWithRoles = memberCoops.map(c => {
+      const o = c.toObject();
+      const localRole = c.memberRoles ? c.memberRoles.get(userId) : null;
+      o.myRole = localRole || req.user.role || 'Membre';
+      return o;
+    });
+    
+    res.json({ memberCoops: coopsWithRoles, pendingCoops });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -753,6 +794,28 @@ router.post('/cooperatives/:id/approve', requireAuth, loadCoop, requirePresident
 
     res.json({ message: 'Membre approuvé' });
   } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Update member role
+router.put('/cooperatives/:id/members/:userId/role', requireAuth, loadCoop, requirePresidentOrAdmin, async (req, res) => {
+  try {
+    const { role } = req.body;
+    if (!['Membre', 'Trésorier', 'Auditeur', 'Président', 'Admin'].includes(role)) {
+      return res.status(400).json({ error: 'Rôle invalide' });
+    }
+    const coop = req.coop;
+    const userId = req.params.userId;
+    const isMember = coop.members.some(m => m.toString() === userId);
+    if (!isMember) return res.status(404).json({ error: 'Membre introuvable dans la coopérative' });
+
+    if (!coop.memberRoles) coop.memberRoles = new Map();
+    coop.memberRoles.set(userId, role);
+    
+    await coop.save();
+    res.json({ success: true, role });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // User accepts an invitation from a cooperative
