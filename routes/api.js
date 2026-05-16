@@ -12,6 +12,8 @@ const Program = require('../models/Program');
 const { ForumThread, ForumPost } = require('../models/Forum');
 const blockchainSvc = require('../blockchain');
 const { parsePhoneNumberFromString } = require('libphonenumber-js');
+const Notification = require('../models/Notification');
+const { createAndEmitNotification } = require('../services/notificationService');
 
 /** Détection de l'opérateur Mobile Money selon le préfixe */
 const MM_OPERATORS = {
@@ -263,6 +265,18 @@ router.get('/cooperatives/:id', requireAuth, loadCoop, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+router.get('/cooperatives/:id/notifications', requireAuth, loadCoop, requireCoopMember, async (req, res) => {
+  try {
+    const notifs = await Notification.find({ cooperativeId: req.params.id })
+      .sort({ createdAt: -1 })
+      .limit(20);
+    res.json(notifs);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/** GET /me/coops — Liste des coops de l'utilisateur avec son rôle local */
 router.get('/me/coops', requireAuth, async (req, res) => {
   try {
     const userId = req.user._id.toString();
@@ -1325,6 +1339,23 @@ router.post('/cooperatives/:id/transactions', requireAuth, loadCoop, requireCoop
     });
     await newTx.save();
 
+    // NOTIFICATION
+    const isCotisation = type === 'in' || category === 'Cotisation';
+    const notifType = isCotisation ? 'cotisation' : 'transaction';
+    const notifTitle = isCotisation ? 'Nouvelle Cotisation' : 'Nouvelle Transaction';
+    const notifMsg = isCotisation 
+      ? `${req.user?.name || 'Un membre'} a effectué une cotisation de ${numericAmount.toLocaleString()} FCFA.`
+      : `${req.user?.name || 'Un membre'} a enregistré une transaction : ${title} (${numericAmount.toLocaleString()} FCFA).`;
+
+    createAndEmitNotification(req.io, {
+      coopId,
+      title: notifTitle,
+      message: notifMsg,
+      type: notifType,
+      senderName: req.user?.name,
+      data: { targetId: newTx._id, amount: numericAmount }
+    });
+
     if (newTx.status === 'completed') {
       const chainHash = await anchorCompletedTransaction(newTx);
       if (chainHash) {
@@ -1549,6 +1580,16 @@ router.post('/cooperatives/:id/proposals', requireAuth, loadCoop, requireCoopMem
       status: 'active'
     });
     await newVote.save();
+
+    // NOTIFICATION
+    createAndEmitNotification(req.io, {
+      coopId: req.params.id,
+      title: 'Nouvelle Proposition de Vote',
+      message: `${req.user?.name || 'Un membre'} a soumis une nouvelle proposition : ${title}`,
+      type: 'vote',
+      senderName: req.user?.name,
+      data: { targetId: newVote._id }
+    });
     try {
       const coopId = req.params.id;
       const activeVotes = await Vote.countDocuments({ cooperativeId: coopId, status: 'active' });
