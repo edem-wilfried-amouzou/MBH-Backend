@@ -12,7 +12,7 @@ const createInvoice = async (amount, description, callbackUrl, returnUrl) => {
   });
 
   const store = new paydunya.Store({
-    name: 'AgriLogix',
+    name: 'agrilogix',
     tagline: 'Transparence financière agricole',
     phoneNumber: '0022890000000',
     postalAddress: 'Lomé, Togo',
@@ -50,7 +50,7 @@ const verifyPayment = async (token) => {
   });
 
   const store = new paydunya.Store({
-    name: 'AgriLogix'
+    name: 'agrilogix'
   });
 
   const invoice = new paydunya.CheckoutInvoice(setup, store);

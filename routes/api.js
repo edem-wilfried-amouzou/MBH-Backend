@@ -2367,7 +2367,7 @@ router.post('/payments/cinetpay/create-payment', async (req, res) => {
     const { amount, description, cooperativeId, customer_name, customer_surname } = req.body;
     const payment = await initPayment({
       amount,
-      description: description || 'Cotisation AgriLogix',
+      description: description || 'Cotisation agrilogix',
       customer_name,
       customer_surname
     });
@@ -2410,9 +2410,9 @@ router.post('/payments/fedapay/create', requireAuth, async (req, res) => {
 
     const result = await fedapayCreate({
       amount: Number(amount),
-      description: description || 'Cotisation AgriLogix',
+      description: description || 'Cotisation agrilogix',
       customerName: req.user.name?.split(' ')[0] || 'Membre',
-      customerSurname: req.user.name?.split(' ').slice(1).join(' ') || 'AgriLogix',
+      customerSurname: req.user.name?.split(' ').slice(1).join(' ') || 'agrilogix',
       customerEmail: req.user.email || '',
       customerPhone: req.user.phone || '',
       callbackUrl,
@@ -2449,7 +2449,7 @@ router.post('/payments/fedapay/direct', requireAuth, async (req, res) => {
       mode, // 'mtn_tg', 'moov_tg', etc.
       description: description || `Cotisation directe de ${req.user.name}`,
       customerName: req.user.name?.split(' ')[0] || 'Membre',
-      customerSurname: req.user.name?.split(' ').slice(1).join(' ') || 'AgriLogix',
+      customerSurname: req.user.name?.split(' ').slice(1).join(' ') || 'agrilogix',
       customerEmail: req.user.email,
       metadata: {
         cooperativeId,

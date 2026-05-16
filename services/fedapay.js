@@ -18,9 +18,9 @@ FedaPay.setEnvironment(isSandbox ? 'sandbox' : 'live');
  */
 const createTransaction = async ({
   amount,
-  description = 'Cotisation AgriLogix',
+  description = 'Cotisation agrilogix',
   customerName = 'Membre',
-  customerSurname = 'AgriLogix',
+  customerSurname = 'agrilogix',
   customerEmail = '',
   customerPhone = '',
   callbackUrl,
@@ -90,9 +90,9 @@ const verifyTransaction = async (transactionId) => {
  */
 const directPay = async ({
   amount,
-  description = 'Cotisation AgriLogix',
+  description = 'Cotisation agrilogix',
   customerName = 'Membre',
-  customerSurname = 'AgriLogix',
+  customerSurname = 'agrilogix',
   customerEmail = '',
   phoneNumber = '',
   mode = 'mtn_tg',
