@@ -256,7 +256,8 @@ router.get('/cooperatives/:id', requireAuth, loadCoop, async (req, res) => {
     // Inject local roles for display
     if (o.members) {
       o.members = o.members.map(m => {
-        return { ...m.user, role: m.role || 'Membre' };
+        const userData = m.user || {};
+        return { ...userData, role: m.role || 'Membre' };
       });
     }
     
