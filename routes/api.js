@@ -616,7 +616,7 @@ router.post('/cooperatives/:id/join', requireAuth, async (req, res) => {
     if (!coop) return res.status(404).json({ error: 'Coop not found' });
     
     // Check if already a member
-    const isMember = coop.members.some(m => m.toString() === userId);
+    const isMember = coop.members.some(m => (m.user?._id || m.user || '').toString() === userId);
     if (isMember) {
       return res.status(400).json({ error: 'Déjà membre de cette coopérative' });
     }
@@ -739,12 +739,10 @@ router.post('/cooperatives/:id/approve', requireAuth, loadCoop, requirePresident
     // Remove from pending
     coop.pendingMembers = coop.pendingMembers.filter(m => m.toString() !== userId);
     
-    // Add to members
-    const isMember = coop.members.some(m => m.toString() === userId);
+    // Add to members with default role
+    const isMember = coop.members.some(m => (m.user?._id || m.user || '').toString() === userId);
     if (!isMember) {
-      coop.members.push(userId);
-      // Ensure the user has at least 'Membre' role
-      await User.findByIdAndUpdate(userId, { $setOnInsert: { role: 'Membre' } }, { upsert: false });
+      coop.members.push({ user: userId, role: 'Membre' });
     }
     
     await coop.save();
