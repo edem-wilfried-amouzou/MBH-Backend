@@ -257,7 +257,11 @@ router.get('/cooperatives/:id', requireAuth, loadCoop, async (req, res) => {
     if (o.members) {
       o.members = o.members.map(m => {
         const userData = m.user || {};
-        return { ...userData, role: m.role || 'Membre' };
+        return { 
+          ...userData, 
+          role: m.role || 'Membre',
+          _id: userData._id || m._id // Garantir une clé unique
+        };
       });
     }
     
