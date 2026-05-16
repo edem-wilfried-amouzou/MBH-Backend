@@ -106,6 +106,14 @@ const { createTransaction: fedapayCreate, verifyTransaction: fedapayVerify, dire
 
 const JWT_SECRET = process.env.JWT_SECRET || 'agrilogix_jwt_secret_2024';
 
+const { 
+  requireAuth, 
+  loadCoop, 
+  requireCoopMember, 
+  requirePresidentOrAdmin,
+  getLocalRole 
+} = require('../middlewares/auth');
+
 /** Ancre une TX Mongo après passage en statut complété (vote, expiration, …). */
 async function maybeAnchorTransactionMongoId(transactionId) {
   const id = transactionId && transactionId.toString();
@@ -129,83 +137,6 @@ const PASSWORD_REGEX = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z\d]).{8,64}$
 
 function isPresident(user) {
   return user?.role === 'Président' || user?.role === 'President';
-}
-
-async function requireAuth(req, res, next) {
-  try {
-    // Try JWT Bearer token first (web frontend)
-    const authHeader = req.header('Authorization');
-    if (authHeader && authHeader.startsWith('Bearer ')) {
-      const token = authHeader.slice(7);
-      const decoded = jwt.verify(token, JWT_SECRET);
-      const user = await User.findById(decoded.userId);
-      if (!user) return res.status(401).json({ error: 'Utilisateur non trouvé' });
-      req.user = user;
-      return next();
-    }
-    // Fallback: x-user-id header (mobile app)
-    const userId = req.header('x-user-id');
-    if (!userId) return res.status(401).json({ error: 'Non authentifié' });
-    const user = await User.findById(userId);
-    if (!user) return res.status(401).json({ error: 'Utilisateur non trouvé' });
-    req.user = user;
-    next();
-  } catch (err) {
-    if (err.name === 'JsonWebTokenError' || err.name === 'TokenExpiredError') {
-      return res.status(401).json({ error: 'Token invalide ou expiré' });
-    }
-    res.status(500).json({ error: err.message });
-  }
-}
-
-async function loadCoop(req, res, next) {
-  try {
-    const coop = await Cooperative.findById(req.params.id);
-    if (!coop) return res.status(404).json({ error: 'Coop not found' });
-    req.coop = coop;
-    next();
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-}
-
-function getLocalRole(coop, userId) {
-  if (!coop || !userId) return null;
-  if (coop.adminId?.toString() === userId) return 'Admin';
-  if (coop.memberRoles && coop.memberRoles.get) {
-    const role = coop.memberRoles.get(userId);
-    if (role) return role;
-  }
-  return null;
-}
-
-function requireCoopMember(req, res, next) {
-  const userId = req.user?._id?.toString();
-  const coop = req.coop;
-  const isMember = coop.members?.some((m) => m.toString() === userId);
-  
-  const localRole = getLocalRole(coop, userId);
-  const isCoopAdminRole = localRole === 'Admin' || localRole === 'Président' || localRole === 'President';
-  // Fallback to global role for retro-compatibility
-  const isGlobalAdmin = isMember && (req.user?.role === 'Admin' || isPresident(req.user));
-  
-  const isAdmin = coop.adminId?.toString() === userId || isCoopAdminRole || isGlobalAdmin;
-  if (isAdmin || isMember) return next();
-  return res.status(403).json({ error: 'Accès refusé: adhésion requise' });
-}
-
-function requirePresidentOrAdmin(req, res, next) {
-  const userId = req.user?._id?.toString();
-  const coop = req.coop;
-  const isMember = coop.members?.some((m) => m.toString() === userId);
-  
-  const localRole = getLocalRole(coop, userId);
-  const isCoopAdminRole = localRole === 'Admin' || localRole === 'Président' || localRole === 'President';
-  const isGlobalAdmin = isMember && (req.user?.role === 'Admin' || isPresident(req.user));
-  
-  const isAdmin = coop.adminId?.toString() === userId || isCoopAdminRole || isGlobalAdmin;
-  if (isAdmin) return next();
-  return res.status(403).json({ error: 'Accès refusé: propriétaire/admin de la coop requis' });
 }
 
 /** Calcule et émet les stats d'une coop en temps réel */
