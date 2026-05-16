@@ -19,21 +19,13 @@ const getLocalRole = (coop, userId) => {
 };
 
 /**
- * Middleware: Authentification via JWT
+ * Middleware: Authentification via JWT (Strict Bearer Token)
  */
 const requireAuth = async (req, res, next) => {
   try {
     const authHeader = req.header('Authorization');
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      // Fallback Temporaire pour la compatibilité mobile (x-user-id)
-      const userIdFallback = req.header('x-user-id');
-      if (userIdFallback) {
-        const user = await User.findById(userIdFallback);
-        if (!user) return res.status(401).json({ error: 'Utilisateur non trouvé' });
-        req.user = user;
-        return next();
-      }
-      return res.status(401).json({ error: 'Authentification requise (Token manquant)' });
+      return res.status(401).json({ error: 'Authentification requise : Token Bearer manquant' });
     }
 
     const token = authHeader.slice(7);
@@ -74,6 +66,32 @@ const requireCoopMember = (req, res, next) => {
 };
 
 /**
+ * Middleware: Vérifie si l'utilisateur est autorisé à voir la comptabilité
+ * Autorise : Trésorier, Président, Auditeur, Admin
+ */
+const requireAccountingAccess = (req, res, next) => {
+  if (!req.coop || !req.user) return res.status(500).json({ error: 'Contexte manquant' });
+  
+  const userId = req.user._id.toString();
+  const localRole = getLocalRole(req.coop, userId);
+  
+  const isAuthorized = [
+    'Trésorier', 'Tresorier', 
+    'Président', 'President', 
+    'Auditeur', 'Admin'
+  ].includes(localRole);
+  
+  const isCoopOwner = req.coop.adminId.toString() === userId;
+  const isGlobalAdmin = req.user.role === 'Admin';
+
+  if (isAuthorized || isCoopOwner || isGlobalAdmin) {
+    return next();
+  }
+
+  res.status(403).json({ error: 'Accès restreint : Seuls le Trésorier, le Président ou l\'Auditeur peuvent accéder à la comptabilité.' });
+};
+
+/**
  * Middleware: Vérifie si l'utilisateur est Président ou Admin de la coop
  */
 const requirePresidentOrAdmin = (req, res, next) => {
@@ -98,5 +116,6 @@ module.exports = {
   loadCoop,
   requireCoopMember,
   requirePresidentOrAdmin,
+  requireAccountingAccess,
   getLocalRole
 };

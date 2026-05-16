@@ -113,6 +113,7 @@ const {
   loadCoop, 
   requireCoopMember, 
   requirePresidentOrAdmin,
+  requireAccountingAccess,
   getLocalRole 
 } = require('../middlewares/auth');
 
@@ -1172,8 +1173,7 @@ router.get('/cooperatives/:id/monthly-transactions', requireAuth, loadCoop, requ
 // ═══════════════════════════════════════════════════════════
 // COMPTABILITÉ — Journal + Bilan + Catégories + Mensuel
 // ═══════════════════════════════════════════════════════════
-// COMPTABILITÉ — Journal + Bilan + Catégories + Mensuel
-router.get('/cooperatives/:id/comptabilite', requireAuth, loadCoop, requireCoopMember, async (req, res) => {
+router.get('/cooperatives/:id/comptabilite', requireAuth, loadCoop, requireCoopMember, requireAccountingAccess, async (req, res) => {
   try {
     const coopId = req.params.id;
     const now = new Date();
@@ -1280,11 +1280,13 @@ router.get('/cooperatives/:id/transactions', requireAuth, loadCoop, requireCoopM
 router.post('/cooperatives/:id/transactions', requireAuth, loadCoop, requireCoopMember, async (req, res) => {
   try {
     const localRole = getLocalRole(req.coop, req.user._id.toString());
-    const isTreasurer = localRole === 'Trésorier' || localRole === 'Admin';
+    // Autoriser Trésorier, Admin (local ou global) et Propriétaire
+    const isTreasurer = ['Trésorier', 'Tresorier', 'Admin'].includes(localRole);
     const isOwner = req.coop.adminId.toString() === req.user._id.toString();
+    const isGlobalAdmin = req.user.role === 'Admin';
     
-    if (!isTreasurer && !isOwner) {
-      return res.status(403).json({ error: 'Seul le trésorier peut enregistrer des transactions' });
+    if (!isTreasurer && !isOwner && !isGlobalAdmin) {
+      return res.status(403).json({ error: 'Accès refusé : Seul le trésorier peut enregistrer des transactions' });
     }
 
     const { title, amount, type, category, accountType, paymentMethod, accountNumber } = req.body;
