@@ -357,6 +357,9 @@ router.post('/users', async (req, res) => {
     if (email?.trim()) {
       doc.email = email.trim().toLowerCase();
     }
+    if (phone?.trim()) {
+      doc.phone = phone.trim();
+    }
 
     const user = new User(doc);
 
