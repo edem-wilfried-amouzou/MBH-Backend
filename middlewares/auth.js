@@ -119,11 +119,23 @@ const requirePresidentOrAdmin = (req, res, next) => {
   res.status(403).json({ error: 'Action réservée au Président ou Administrateur' });
 };
 
+/**
+ * Middleware: Vérifie si l'utilisateur est un Administrateur Système (isSystemAdmin)
+ */
+const requireSystemAdmin = (req, res, next) => {
+  if (!req.user) return res.status(401).json({ error: 'Authentification requise' });
+  if (!req.user.isSystemAdmin) {
+    return res.status(403).json({ error: 'Accès restreint : Réservé aux Administrateurs Système' });
+  }
+  next();
+};
+
 module.exports = {
   requireAuth,
   loadCoop,
   requireCoopMember,
   requirePresidentOrAdmin,
   requireAccountingAccess,
+  requireSystemAdmin,
   getLocalRole
 };
