@@ -247,17 +247,16 @@ function canManageCoopMembers(user, coop) {
 router.get('/cooperatives/:id', requireAuth, loadCoop, async (req, res) => {
   try {
     const coop = await Cooperative.findById(req.params.id)
-      .populate('members')
+      .populate('members.user')
       .populate('pendingMembers')
       .populate('adminId');
     if (!coop) return res.status(404).json({ error: 'Coop not found' });
     const o = coop.toObject();
     
-    // Inject local roles
-    if (o.members && coop.memberRoles) {
+    // Inject local roles for display
+    if (o.members) {
       o.members = o.members.map(m => {
-        const role = coop.memberRoles.get(m._id.toString());
-        return { ...m, role: role || m.role || 'Membre' };
+        return { ...m.user, role: m.role || 'Membre' };
       });
     }
     
@@ -482,15 +481,14 @@ router.post('/cooperatives', requireAuth, async (req, res) => {
     const coop = new Cooperative({
       ...req.body,
       adminId: req.user._id,
-      members: [req.user._id],
+      members: [{ user: req.user._id, role: 'Président' }],
       inviteToken,
       inviteTokenCreatedAt: new Date(),
     });
     await coop.save();
     
-    // Mettre à jour le rôle de l'utilisateur
-    await User.findByIdAndUpdate(req.user._id, { role: 'Président' });
-    console.log('Coop created and role updated for:', req.user?.name);
+    // Plus besoin de mettre à jour User.role car c'est local à la coop
+    console.log('Coop created with Président role for:', req.user?.name);
 
     res.status(201).json(coop);
   } catch (err) { 
@@ -534,13 +532,10 @@ router.put('/cooperatives/:id/members/:userId/role', requireAuth, loadCoop, requ
     const coop = await Cooperative.findById(id);
     if (!coop) return res.status(404).json({ error: 'Coopérative non trouvée' });
 
-    if (!coop.memberRoles) coop.memberRoles = new Map();
-    
-    // On stocke le rôle spécifique dans la coopérative
-    coop.memberRoles.set(userId, role);
-    
-    // On marque la map comme modifiée pour Mongoose
-    coop.markModified('memberRoles');
+    const memberIndex = coop.members.findIndex(m => m.user.toString() === userId);
+    if (memberIndex === -1) return res.status(404).json({ error: 'Membre non trouvé dans cette coopérative' });
+
+    coop.members[memberIndex].role = role;
     await coop.save();
 
     res.json({ success: true, userId, role });

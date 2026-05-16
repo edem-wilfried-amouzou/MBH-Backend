@@ -8,14 +8,13 @@ const JWT_SECRET = process.env.JWT_SECRET || 'agrilogix_jwt_secret_2024';
  * Helper: Récupère le rôle d'un utilisateur dans une coopérative (depuis memberRoles Map)
  */
 const getLocalRole = (coop, userId) => {
-  if (!coop || !userId) return 'Membre';
-  if (coop.memberRoles && coop.memberRoles.get) {
-    return coop.memberRoles.get(userId.toString()) || 'Membre';
-  }
-  if (coop.memberRoles && typeof coop.memberRoles === 'object') {
-    return coop.memberRoles[userId.toString()] || 'Membre';
-  }
-  return 'Membre';
+  if (!coop || !userId || !coop.members) return 'Membre';
+  // Recherche dans le nouveau format d'array d'objets
+  const m = coop.members.find(m => {
+    const mId = m.user?._id || m.user || '';
+    return mId.toString() === userId.toString();
+  });
+  return m ? m.role : 'Membre';
 };
 
 /**
