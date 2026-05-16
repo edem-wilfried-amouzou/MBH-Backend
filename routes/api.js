@@ -537,7 +537,7 @@ router.put('/cooperatives/:id/members/:userId/role', requireAuth, loadCoop, requ
     const coop = await Cooperative.findById(id);
     if (!coop) return res.status(404).json({ error: 'Coopérative non trouvée' });
 
-    const memberIndex = coop.members.findIndex(m => m.user.toString() === userId);
+    const memberIndex = coop.members.findIndex(m => (m.user?._id || m.user || '').toString() === userId);
     if (memberIndex === -1) return res.status(404).json({ error: 'Membre non trouvé dans cette coopérative' });
 
     coop.members[memberIndex].role = role;
@@ -764,27 +764,7 @@ router.post('/cooperatives/:id/approve', requireAuth, loadCoop, requirePresident
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// Update member role
-router.put('/cooperatives/:id/members/:userId/role', requireAuth, loadCoop, requirePresidentOrAdmin, async (req, res) => {
-  try {
-    const { role } = req.body;
-    if (!['Membre', 'Trésorier', 'Auditeur', 'Président', 'Admin'].includes(role)) {
-      return res.status(400).json({ error: 'Rôle invalide' });
-    }
-    const coop = req.coop;
-    const userId = req.params.userId;
-    const isMember = coop.members.some(m => m.toString() === userId);
-    if (!isMember) return res.status(404).json({ error: 'Membre introuvable dans la coopérative' });
-
-    if (!coop.memberRoles) coop.memberRoles = new Map();
-    coop.memberRoles.set(userId, role);
-    
-    await coop.save();
-    res.json({ success: true, role });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
+// Les invitations sont gérées via pendingMembers ou liens uniques.
 
 // User accepts an invitation from a cooperative
 router.post('/cooperatives/:id/accept-invitation', requireAuth, loadCoop, async (req, res) => {
@@ -800,7 +780,9 @@ router.post('/cooperatives/:id/accept-invitation', requireAuth, loadCoop, async 
     
     // Move from pending to members
     coop.pendingMembers = coop.pendingMembers.filter(m => m.toString() !== userId);
-    coop.members.push(userId);
+    if (!coop.members.some(m => (m.user?._id || m.user || '').toString() === userId)) {
+      coop.members.push({ user: userId, role: 'Membre', joinedAt: new Date() });
+    }
     await coop.save();
     
     res.json({ message: 'Bienvenue dans la coopérative !', cooperative: coop });
@@ -838,17 +820,21 @@ router.post('/cooperatives/:id/members', requireAuth, loadCoop, requirePresident
     }
 
     const idStr = uid.toString();
-    const already = coop.members.some((m) => m.toString() === idStr);
+    const already = coop.members.some((m) => (m.user?._id || m.user || '').toString() === idStr);
     const inPending = coop.pendingMembers.some((m) => m.toString() === idStr);
+    
     if (inPending) {
       coop.pendingMembers = coop.pendingMembers.filter((m) => m.toString() !== idStr);
     }
+    
     if (!already) {
-      coop.members.push(uid);
-    }
-
-    if (role) {
-      await User.findByIdAndUpdate(uid, { role }, { upsert: false });
+      coop.members.push({ user: uid, role: role || 'Membre', joinedAt: new Date() });
+    } else if (role) {
+      // Update role if already member
+      const memberIdx = coop.members.findIndex(m => (m.user?._id || m.user || '').toString() === idStr);
+      if (memberIdx > -1) {
+        coop.members[memberIdx].role = role;
+      }
     }
 
     if (inPending || !already) {
@@ -896,7 +882,7 @@ router.post('/cooperatives/:id/members/create', requireAuth, loadCoop, requirePr
     await newUser.save();
 
     // Ajouter à la coopérative
-    coop.members.push(newUser._id);
+    coop.members.push({ user: newUser._id, role: role || 'Membre', joinedAt: new Date() });
     await coop.save();
 
     res.status(201).json({ message: 'Membre créé et ajouté', user: { _id: newUser._id, name: newUser.name, role: newUser.role } });
