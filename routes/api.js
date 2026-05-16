@@ -307,6 +307,23 @@ router.post('/notifications/:notifId/read', requireAuth, async (req, res) => {
   }
 });
 
+/**
+ * POST /api/cooperatives/:id/notifications/read-all
+ * Marque toutes les notifications d'une coop comme lues
+ */
+router.post('/cooperatives/:id/notifications/read-all', requireAuth, loadCoop, requireCoopMember, async (req, res) => {
+  try {
+    const userId = req.user._id;
+    await Notification.updateMany(
+      { cooperativeId: req.params.id },
+      { $addToSet: { readBy: userId } }
+    );
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 router.get('/cooperatives/:id/forum/stats', requireAuth, loadCoop, requireCoopMember, async (req, res) => {
   try {
     // Return a dummy unreadCount until read receipts are fully implemented
@@ -2515,15 +2532,16 @@ router.post('/payments/fedapay/callback', async (req, res) => {
           await anchorCompletedTransaction(tx).catch(() => {});
           console.log('[FedaPay Callback] Transaction enregistrée:', tx._id);
 
-          // Notification temps réel (Helper centralisé)
-          await emitCoopStats(req.io, cooperativeId);
-
-          if (req.io) {
-            req.io.to(`coop_${cooperativeId}`).emit('stats_update', { 
-              newTransaction: tx,
-              message: `Cotisation de ${submittedBy} reçue (${amount} FCFA)` 
-            });
-          }
+          // Notification persistante et push
+          await createAndEmitNotification(req.io, {
+            coopId: cooperativeId,
+            title: 'Nouvelle Cotisation',
+            message: `Cotisation de ${submittedBy} reçue (${amount} FCFA)`,
+            type: 'cotisation',
+            senderName: submittedBy,
+            actorId: custom_metadata?.userId || null,
+            data: { targetId: tx._id, amount: Number(amount) }
+          });
         }
       }
     } else if (status === 'declined' || status === 'canceled') {
@@ -2588,18 +2606,16 @@ router.post('/payments/fedapay/confirm-contribution', requireAuth, async (req, r
     await tx.save();
     await anchorCompletedTransaction(tx).catch(() => {});
 
-    // Notification temps réel (Helper centralisé)
-    await emitCoopStats(req.io, cooperativeId, req.user._id);
-    
-    console.log('[FedaPay] Cotisation confirmée pour l\'utilisateur:', req.user._id);
-    
-    // Notification spécifique pour le message
-    if (req.io) {
-      req.io.to(`coop_${cooperativeId}`).emit('stats_update', { 
-        newTransaction: tx,
-        message: `Cotisation de ${req.user.name} confirmée (${tx.amount} FCFA)` 
-      });
-    }
+    // Notification persistante et push
+    await createAndEmitNotification(req.io, {
+      coopId: cooperativeId,
+      title: 'Cotisation Confirmée',
+      message: `Cotisation de ${req.user.name} confirmée (${tx.amount} FCFA)`,
+      type: 'cotisation',
+      senderName: req.user.name,
+      actorId: req.user._id,
+      data: { targetId: tx._id, amount: tx.amount }
+    });
 
 
     res.status(201).json({ message: 'Cotisation confirmée', transaction: tx });
@@ -2627,7 +2643,17 @@ router.post('/cooperatives/:id/contribute', requireAuth, async (req, res) => {
     await tx.save();
     await maybeAnchorTransactionMongoId(tx._id);
 
-    // Notification temps réel
+    // Notification persistante et push
+    await createAndEmitNotification(req.io, {
+      coopId: req.params.id,
+      title: 'Nouvelle Cotisation',
+      message: `Contribution de ${req.user.name} de ${amount} FCFA enregistrée.`,
+      type: 'cotisation',
+      senderName: req.user.name,
+      actorId: req.user._id,
+      data: { targetId: tx._id, amount: amount }
+    });
+
     await emitCoopStats(req.io, req.params.id, req.user._id);
 
     res.status(201).json(tx);
