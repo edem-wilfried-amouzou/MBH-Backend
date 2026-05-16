@@ -14,6 +14,7 @@ const notificationSchema = new mongoose.Schema({
     default: 'announcement'
   },
   senderName: String,
+  actorId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
   data: {
     targetId: mongoose.Schema.Types.ObjectId,
     amount: Number,

@@ -8,7 +8,7 @@ const Cooperative = require('../models/Cooperative');
  * @param {Object} io - Instance Socket.io
  * @param {Object} params - { coopId, title, message, type, senderName, data }
  */
-async function createAndEmitNotification(io, { coopId, title, message, type, senderName, data }) {
+async function createAndEmitNotification(io, { coopId, title, message, type, senderName, actorId, data }) {
   try {
     const notif = await Notification.create({
       cooperativeId: coopId,
@@ -16,6 +16,7 @@ async function createAndEmitNotification(io, { coopId, title, message, type, sen
       message,
       type,
       senderName,
+      actorId,
       data
     });
 

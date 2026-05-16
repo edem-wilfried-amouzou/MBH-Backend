@@ -1370,6 +1370,7 @@ router.post('/cooperatives/:id/transactions', requireAuth, loadCoop, requireCoop
       message: notifMsg,
       type: notifType,
       senderName: req.user?.name,
+      actorId: req.user?._id,
       data: { targetId: newTx._id, amount: numericAmount }
     });
 
@@ -1605,6 +1606,7 @@ router.post('/cooperatives/:id/proposals', requireAuth, loadCoop, requireCoopMem
       message: `${req.user?.name || 'Un membre'} a soumis une nouvelle proposition : ${title}`,
       type: 'vote',
       senderName: req.user?.name,
+      actorId: req.user?._id,
       data: { targetId: newVote._id }
     });
     try {
