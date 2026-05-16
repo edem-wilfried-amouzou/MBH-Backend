@@ -56,12 +56,21 @@ const loadCoop = async (req, res, next) => {
 
 const requireCoopMember = (req, res, next) => {
   if (!req.coop || !req.user) return res.status(500).json({ error: 'Contexte manquant' });
-  const isMember = req.coop.members.some(m => m.toString() === req.user._id.toString());
-  const isAdmin = req.coop.adminId.toString() === req.user._id.toString();
-  if (!isMember && !isAdmin) {
-    return res.status(403).json({ error: 'Accès réservé aux membres de la coopérative' });
+  
+  const userId = req.user._id.toString();
+  const isMember = req.coop.members.some(m => {
+    const mId = m.user?._id || m.user || '';
+    return mId.toString() === userId;
+  });
+  
+  const isOwner = req.coop.adminId.toString() === userId;
+  const isGlobalAdmin = req.user.isSystemAdmin;
+
+  if (isMember || isOwner || isGlobalAdmin) {
+    return next();
   }
-  next();
+  
+  res.status(403).json({ error: 'Accès réservé aux membres de la coopérative' });
 };
 
 /**
@@ -81,7 +90,7 @@ const requireAccountingAccess = (req, res, next) => {
   ].includes(localRole);
   
   const isCoopOwner = req.coop.adminId.toString() === userId;
-  const isGlobalAdmin = req.user.role === 'Admin';
+  const isGlobalAdmin = req.user.isSystemAdmin;
 
   if (isAuthorized || isCoopOwner || isGlobalAdmin) {
     return next();
@@ -100,7 +109,7 @@ const requirePresidentOrAdmin = (req, res, next) => {
   const localRole = getLocalRole(req.coop, userId);
   
   const isCoopAdminRole = localRole === 'Admin' || localRole === 'Président' || localRole === 'President';
-  const isGlobalAdmin = req.user.role === 'Admin';
+  const isGlobalAdmin = req.user.isSystemAdmin;
   const isCoopOwner = req.coop.adminId.toString() === userId;
 
   if (isCoopAdminRole || isGlobalAdmin || isCoopOwner) {
