@@ -363,6 +363,20 @@ router.post('/users', async (req, res) => {
   }
 });
 
+router.post('/users/push-token', requireAuth, async (req, res) => {
+  try {
+    const { token } = req.body;
+    if (!token) return res.status(400).json({ error: 'Token manquant' });
+    
+    // On met à jour le token de l'utilisateur authentifié
+    await User.findByIdAndUpdate(req.user._id, { pushToken: token });
+    console.log(`[Push] Token enregistré pour ${req.user.name}`);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 router.post('/users/guide-seen', requireAuth, async (req, res) => {
   try {
     const user = await User.findById(req.user._id);
@@ -370,18 +384,6 @@ router.post('/users/guide-seen', requireAuth, async (req, res) => {
     user.hasSeenGuide = true;
     await user.save();
     res.json({ success: true, hasSeenGuide: true });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-router.post('/users/push-token', requireAuth, async (req, res) => {
-  try {
-    const { token } = req.body;
-    if (!token) return res.status(400).json({ error: 'Token manquant' });
-    
-    await User.findByIdAndUpdate(req.user._id, { pushToken: token });
-    res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
