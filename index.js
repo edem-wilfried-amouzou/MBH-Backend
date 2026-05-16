@@ -6,6 +6,10 @@ const bodyParser = require('body-parser');
 const mongoose = require('mongoose');
 const http = require('http');
 const { Server } = require('socket.io');
+const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
+const sanitize = require('mongo-sanitize');
+const jwt = require('jsonwebtoken');
 
 const apiRoutes = require('./routes/api');
 const User = require('./models/User');
@@ -54,6 +58,16 @@ const io = new Server(server, {
   },
 });
 
+app.use(helmet());
+
+// Rate Limiting
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 200, // Limit each IP to 200 requests per windowMs
+  message: { error: 'Trop de requêtes, veuillez réessayer plus tard.' }
+});
+app.use('/api/', limiter);
+
 app.use(
   cors({
     origin: (origin, cb) => cb(null, originAllows(origin)),
@@ -61,6 +75,14 @@ app.use(
   })
 );
 app.use(bodyParser.json());
+
+// NoSQL Injection Protection
+app.use((req, res, next) => {
+  req.body = sanitize(req.body);
+  req.query = sanitize(req.query);
+  req.params = sanitize(req.params);
+  next();
+});
 
 // Attach io to req so routes can use it
 app.use((req, res, next) => {
@@ -89,17 +111,33 @@ mongoose
 app.use('/api', apiRoutes);
 app.use('/', apiRoutes); // Mount at root to support /login and /api/login
 
-// Socket.IO authentication middleware
+// Socket.IO authentication middleware (Supports JWT & Fallback)
 io.use(async (socket, next) => {
   try {
+    const token = socket.handshake.auth?.token;
     const userId = socket.handshake.auth?.userId || socket.handshake.headers['x-user-id'];
-    if (!userId) return next(new Error('Authentication required'));
-    const user = await User.findById(userId);
-    if (!user) return next(new Error('Invalid user'));
-    socket.user = user;
-    return next();
+    
+    if (token) {
+      const JWT_SECRET = process.env.JWT_SECRET || 'agrilogix_jwt_secret_2024';
+      const decoded = jwt.verify(token, JWT_SECRET);
+      const user = await User.findById(decoded.userId);
+      if (user) {
+        socket.user = user;
+        return next();
+      }
+    }
+
+    if (userId) {
+      const user = await User.findById(userId);
+      if (user) {
+        socket.user = user;
+        return next();
+      }
+    }
+
+    return next(new Error('Authentication required'));
   } catch (err) {
-    return next(err);
+    return next(new Error('Invalid token or user'));
   }
 });
 
