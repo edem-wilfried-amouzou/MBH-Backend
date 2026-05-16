@@ -1307,6 +1307,14 @@ router.get('/cooperatives/:id/transactions', requireAuth, loadCoop, requireCoopM
 
 router.post('/cooperatives/:id/transactions', requireAuth, loadCoop, requireCoopMember, async (req, res) => {
   try {
+    const localRole = getLocalRole(req.coop, req.user._id.toString());
+    const isTreasurer = localRole === 'Trésorier' || localRole === 'Admin';
+    const isOwner = req.coop.adminId.toString() === req.user._id.toString();
+    
+    if (!isTreasurer && !isOwner) {
+      return res.status(403).json({ error: 'Seul le trésorier peut enregistrer des transactions' });
+    }
+
     const { title, amount, type, category, accountType, paymentMethod, accountNumber } = req.body;
     const coopId = req.params.id;
     if (!amount || Number(amount) <= 0) return res.status(400).json({ error: 'Montant invalide' });
