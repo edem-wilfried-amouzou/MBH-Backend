@@ -2725,61 +2725,6 @@ router.post('/cooperatives/:id/transfer', requireAuth, loadCoop, async (req, res
     res.status(500).json({ error: err.message });
   }
 });
-
-/**
- * ADMIN: Statistiques globales
- */
-router.get('/admin/stats', requireAuth, requireSystemAdmin, async (req, res) => {
-  try {
-    const [coopCount, userCount, txCount, totalVolume] = await Promise.all([
-      Cooperative.countDocuments(),
-      User.countDocuments(),
-      Transaction.countDocuments({ status: 'completed' }),
-      Transaction.aggregate([
-        { $match: { status: 'completed' } },
-        { $group: { _id: null, total: { $sum: '$amount' } } }
-      ])
-    ]);
-
-    res.json({
-      coopCount,
-      userCount,
-      txCount,
-      totalVolume: totalVolume[0]?.total || 0,
-      blockchain: {
-        isAvailable: blockchainSvc.isAvailable(),
-        network: process.env.BLOCKCHAIN_NETWORK_LABEL || 'Polygon'
-      }
-    });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-/**
- * ADMIN: Liste globale des coopératives
- */
-router.get('/admin/cooperatives', requireAuth, requireSystemAdmin, async (req, res) => {
-  try {
-    const coops = await Cooperative.find().sort({ createdAt: -1 });
-    res.json(coops);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-/**
- * ADMIN: Liste globale des utilisateurs
- */
-router.get('/admin/users', requireAuth, requireSystemAdmin, async (req, res) => {
-  try {
-    const users = await User.find().select('-password').sort({ createdAt: -1 });
-    res.json(users);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
 module.exports = router;
 
 

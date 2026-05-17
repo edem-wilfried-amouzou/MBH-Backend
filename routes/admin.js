@@ -102,4 +102,16 @@ router.get('/cooperatives', requireAdminAuth, async (req, res) => {
   }
 });
 
+/**
+ * GET /admin/users
+ */
+router.get('/users', requireAdminAuth, async (req, res) => {
+  try {
+    const users = await User.find().select('-password').sort({ createdAt: -1 });
+    res.json(users);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = { router, requireAdminAuth };
