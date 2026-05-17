@@ -16,6 +16,7 @@ const UserSchema = new mongoose.Schema({
   pushToken: { type: String, default: null },
   acceptedTerms: { type: Boolean, default: false },
   acceptedTermsAt: { type: Date },
+  isSuspended: { type: Boolean, default: false },
   createdAt: { type: Date, default: Date.now }
 });
 

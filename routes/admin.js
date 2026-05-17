@@ -114,4 +114,32 @@ router.get('/users', requireAdminAuth, async (req, res) => {
   }
 });
 
+/**
+ * PUT /admin/users/:id
+ */
+router.put('/users/:id', requireAdminAuth, async (req, res) => {
+  try {
+    const { name, phone, address, email, profession, bio, isSystemAdmin, isSuspended } = req.body;
+    const user = await User.findById(req.params.id);
+    if (!user) return res.status(404).json({ error: 'Utilisateur non trouvé' });
+
+    if (name !== undefined) user.name = name;
+    if (phone !== undefined) user.phone = phone;
+    if (address !== undefined) user.address = address;
+    if (email !== undefined) user.email = email;
+    if (profession !== undefined) user.profession = profession;
+    if (bio !== undefined) user.bio = bio;
+    if (isSystemAdmin !== undefined) user.isSystemAdmin = isSystemAdmin;
+    if (isSuspended !== undefined) user.isSuspended = isSuspended;
+
+    await user.save();
+    
+    const userObj = user.toObject();
+    delete userObj.password;
+    res.json(userObj);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = { router, requireAdminAuth };

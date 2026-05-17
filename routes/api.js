@@ -518,6 +518,11 @@ router.post('/login', async (req, res) => {
       return res.status(401).json({ error: 'Nom ou mot de passe incorrect' });
     }
     
+    if (user.isSuspended) {
+      console.log(`Login blocked: User ${user.name} is suspended`);
+      return res.status(403).json({ error: 'Votre compte a été suspendu par l\'administrateur' });
+    }
+    
     console.log(`Login successful:`, user.name);
     // Issue JWT token
     const token = jwt.sign({ userId: user._id.toString() }, JWT_SECRET, { expiresIn: '7d' });
